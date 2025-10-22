@@ -4,6 +4,7 @@
 #include <fstream>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 
 FileStore::FileStore(const std::string& storage_dir) : storage_dir(storage_dir) {
   // Create storage directory if it doesn't exist

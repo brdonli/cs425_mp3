@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <functional>
+#include <mutex>
 #include <sstream>
 
 void ConsistentHashRing::addNode(const NodeId& node) {

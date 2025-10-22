@@ -1,6 +1,7 @@
 #include "client_tracker.hpp"
 
 #include <algorithm>
+#include <mutex>
 
 void ClientTracker::recordAppend(const std::string& client_id, const std::string& filename,
                                  uint64_t block_id) {
