@@ -4,6 +4,7 @@
 #include <functional>
 #include <mutex>
 #include <sstream>
+#include <unordered_set>
 
 void ConsistentHashRing::addNode(const NodeId& node) {
   std::unique_lock<std::shared_mutex> lock(mtx);
@@ -36,15 +37,25 @@ std::vector<NodeId> ConsistentHashRing::getSuccessors(uint64_t position, int n) 
   // Find the first node at or after the position
   auto it = ring.lower_bound(position);
 
+  // Track unique nodes to prevent duplicates when n > ring.size()
+  std::unordered_set<NodeId> seen;
+
   // Collect n successors (wrapping around if necessary)
+  // Stop when we have n replicas OR when we've exhausted all unique nodes
   int collected = 0;
-  while (collected < n && collected < static_cast<int>(ring.size())) {
+  while (collected < n && seen.size() < ring.size()) {
     if (it == ring.end()) {
       it = ring.begin();  // wrap around
     }
-    successors.push_back(it->second);
+
+    // Only add if we haven't seen this node before
+    if (seen.find(it->second) == seen.end()) {
+      successors.push_back(it->second);
+      seen.insert(it->second);
+      ++collected;
+    }
+
     ++it;
-    ++collected;
   }
 
   return successors;
