@@ -2,7 +2,7 @@
 
 # Script to kill all running main processes on all VMs
 
-NETID="your_netid"  # Replace with your NetID
+NETID="rayans2"  # Replace with your NetID
 MACHINES=(01 02 03 04 05 06 07 08 09 10)
 BASE_HOST="fa25-cs425-16"
 DOMAIN="cs.illinois.edu"

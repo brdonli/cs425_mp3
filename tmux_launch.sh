@@ -90,10 +90,31 @@ for i in "${!MACHINES[@]}"; do
     # Send the SSH command to the pane
     tmux send-keys -t ${SESSION_NAME}:${window}.${pane} "$cmd" C-m
 
-    # For non-introducer nodes, prepare the join command (but don't send it yet)
+    # For non-introducer nodes, auto-send join command after a delay
     if [ "$machine" != "01" ]; then
         sleep 0.5
-        # The user will need to type 'join' manually in each pane
+    fi
+done
+
+# Wait for all VMs to start up, then send 'join' to all non-introducer panes
+sleep 3
+
+echo -e "${YELLOW}Auto-joining all VMs...${NC}"
+for i in "${!MACHINES[@]}"; do
+    machine="${MACHINES[$i]}"
+
+    if [ "$machine" != "01" ]; then
+        # Determine which window the pane is in
+        if [ $i -lt 5 ]; then
+            window=0
+            pane=$i
+        else
+            window=1
+            pane=$((i - 5))
+        fi
+
+        # Send 'join' command
+        tmux send-keys -t ${SESSION_NAME}:${window}.${pane} "join" C-m
     fi
 done
 
@@ -108,7 +129,7 @@ tmux select-pane -t ${SESSION_NAME}:0.0
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Tmux session created!${NC}"
+echo -e "${GREEN}All VMs joined automatically!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${YELLOW}To attach to the session:${NC}"
@@ -120,9 +141,9 @@ echo -e "  Ctrl+B then [ - Scroll mode (q to exit)"
 echo -e "  Ctrl+B then z - Zoom current pane (toggle)"
 echo -e "  Ctrl+B then d - Detach (session keeps running)"
 echo ""
-echo -e "${YELLOW}To type in all panes at once (useful for 'join'):${NC}"
+echo -e "${YELLOW}To synchronize input to all panes:${NC}"
 echo -e "  Ctrl+B then :setw synchronize-panes on"
-echo -e "  Then type 'join' - it will go to all panes"
+echo -e "  Type commands - they go to all panes"
 echo -e "  Ctrl+B then :setw synchronize-panes off"
 echo ""
 echo -e "${YELLOW}To kill the session:${NC}"
