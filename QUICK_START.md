@@ -95,10 +95,12 @@ cd ~/cs425_mp3
 
 ## Commands Available in Each VM Terminal
 
+### MP2 Commands (Membership)
 ```
 join                          - Join network (VM02-10 only)
 leave                         - Leave network
 list_mem                      - Show all members
+list_mem_ids                  - Show members with ring IDs (MP3)
 list_self                     - Show self information
 display_suspects              - Show suspected nodes
 display_protocol              - Show current protocol
@@ -106,6 +108,17 @@ switch gossip suspect         - Switch to gossip with suspicion
 switch gossip nosuspect       - Switch to gossip without suspicion
 switch ping suspect           - Switch to ping-ack with suspicion
 switch ping nosuspect         - Switch to ping-ack without suspicion
+```
+
+### MP3 Commands (File System) - Coming Soon
+```
+create <local> <hydfs>        - Create file in HyDFS
+get <hydfs> <local>           - Get file from HyDFS
+append <local> <hydfs>        - Append to file in HyDFS
+merge <hydfs>                 - Merge file replicas
+ls <hydfs>                    - Show file location and info
+liststore                     - List files stored on this node
+getfromreplica <vm> <hydfs> <local> - Get from specific replica
 ```
 
 ## Testing Workflow
