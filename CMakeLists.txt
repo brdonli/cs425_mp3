@@ -18,6 +18,12 @@ add_library(core
     src/membership_list.cpp
     src/node.cpp
     src/shared.cpp
+    # MP3 file system components
+    src/file_block.cpp
+    src/file_metadata.cpp
+    src/consistent_hash_ring.cpp
+    src/file_store.cpp
+    src/client_tracker.cpp
 )
 
 # --- Applications ---
