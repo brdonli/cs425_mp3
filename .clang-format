@@ -1,0 +1,4 @@
+AllowShortIfStatementsOnASingleLine: WithoutElse
+BreakConstructorInitializers: AfterColon
+ColumnLimit: 100
+BasedOnStyle: Google
