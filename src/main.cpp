@@ -32,6 +32,8 @@ int main(int argc, char* argv[]) {
     std::cin >> input;
     if (input == "list_mem") {
       node.logMemList();
+    } else if (input == "list_mem_ids") {
+      node.logMemListWithIds();
     } else if (input == "list_self") {
       node.logSelf();
     } else if (input == "join") {

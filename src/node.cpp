@@ -1,9 +1,11 @@
 #include "node.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -18,6 +20,7 @@ Node::Node(const std::string_view& host, const std::string_view& port, NodeId& i
     socket(host, port), introducer(introducer), mem_list(logger), logger(logger), fd_mode(PINGACK) {
   self = NodeId::createNewNode(host, port);
   mem_list.addNode({self, NodeStatus::ALIVE, FailureDetectionMode::PINGACK, currTime(), 0, 0});
+  ring.addNode(self);  // MP3: Add self to ring
   fd_mode = FailureDetectionMode::PINGACK;
   socket.initializeUDPConnection();
   introducer_alive = (std::strcmp(introducer.host, self.host) == 0 &&
@@ -127,6 +130,7 @@ void Node::runPingAck(bool enable_suspicion) {
       uint32_t time_delta = curr_time - latest.local_time;
       if (latest.status == NodeStatus::LEFT && time_delta > T_CLEANUP) {
         mem_list.removeNode(latest.node_id, true);
+        ring.removeNode(latest.node_id);  // MP3: Remove from ring
         continue;
       }
       if (updateStatus(neighbor, time_delta, enable_suspicion))
@@ -166,8 +170,10 @@ void Node::runGossip(bool enable_suspicion) {
       mem_list.updateNodeStatus(id, NodeStatus::DEAD);  // SUS --> DEAD
     } else if (node.status == NodeStatus::DEAD && passed_time > T_CLEANUP) {
       mem_list.removeNode(id);  // remove from mem_list
+      ring.removeNode(id);  // MP3: Remove from ring
     } else if (node.status == NodeStatus::LEFT && passed_time > T_CLEANUP) {
       mem_list.removeNode(node.node_id, true);
+      ring.removeNode(node.node_id);  // MP3: Remove from ring
     }
   }
 
@@ -213,6 +219,7 @@ bool Node::updateStatus(const MembershipInfo& old_info, const uint32_t time_delt
       case NodeStatus::LEFT:
         if (time_delta > T_CLEANUP) {
           mem_list.removeNode(node_id, old_info.status == NodeStatus::LEFT);
+          ring.removeNode(node_id);  // MP3: Remove from ring
           updated = true;
         }
         break;
@@ -225,6 +232,9 @@ void Node::handleJoin(std::array<char, UDPSocketConnection::BUFFER_LEN>& buffer,
                       struct sockaddr_in& client_addr, MembershipInfo& new_node) {
   // when introducer sees join adds it to its mem_list and then shares to network
   if (new_node.mode != fd_mode) mem_list.updateMode(new_node.node_id, fd_mode);
+
+  // MP3: Add new node to ring
+  ring.addNode(new_node.node_id);
 
   // send new node current membership list
   const std::vector<MembershipInfo> mem_list_copy = mem_list.copy();
@@ -305,6 +315,7 @@ void Node::handlePing(std::array<char, UDPSocketConnection::BUFFER_LEN>& buffer,
   } catch (std::runtime_error const&) {
     // if we haven't seen this node add it to membership list
     mem_list.addNode(node);
+    ring.addNode(node.node_id);  // MP3: Add to ring
   }
 
   // when a node receives a PING they reply with ACK
@@ -323,6 +334,7 @@ Message Node::sendPing() {
 void Node::handleAck(const MembershipInfo& node) {
   if (!introducer_alive) {
     mem_list.addNode(node);
+    ring.addNode(node.node_id);  // MP3: Add to ring
     if (node.mode != fd_mode) {
       mem_list.updateMode(self, node.mode);
       fd_mode = node.mode;
@@ -391,10 +403,12 @@ std::vector<MembershipInfo> Node::handleGossip(const Message& message) {
             } else {
               // case 5: diff status, update from SUS to DEAD --> remove from mem_list
               mem_list.removeNode(curr_status.node_id);
+              ring.removeNode(curr_status.node_id);  // MP3: Remove from ring
             }
           } else if (update.status == NodeStatus::LEFT && curr_status.status != NodeStatus::LEFT) {
             // we didn't know that node left
             mem_list.removeNode(update.node_id, true);
+            ring.removeNode(update.node_id);  // MP3: Remove from ring
             updates.push_back(update);  // want to gossip this info to other nodes
           } else if ((curr_status.status == NodeStatus::SUSPECT ||
                       curr_status.status == NodeStatus::DEAD) &&
@@ -408,6 +422,7 @@ std::vector<MembershipInfo> Node::handleGossip(const Message& message) {
     } catch (std::runtime_error const&) {
       // case 1: new node --> add to mem_list
       mem_list.addNode(update);
+      ring.addNode(update.node_id);  // MP3: Add new node to ring
     }
   }
   return updates;
@@ -486,4 +501,47 @@ void Node::switchModes(FailureDetectionMode mode) {
   std::cout << "\n";
   // std::this_thread::sleep_for(std::chrono::seconds(6));  // wait for other nodes to process
   fd_mode = mode;
+}
+
+// MP3: List membership with ring IDs
+void Node::logMemListWithIds() {
+  std::vector<MembershipInfo> members = mem_list.copy();
+
+  // Create a vector of (ring_id, member) pairs
+  std::vector<std::pair<uint64_t, MembershipInfo>> sorted_members;
+  for (const auto& member : members) {
+    uint64_t ring_id = ring.getNodePosition(member.node_id);
+    sorted_members.push_back({ring_id, member});
+  }
+
+  // Sort by ring ID
+  std::sort(sorted_members.begin(), sorted_members.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+
+  // Print header
+  std::cout << "\n========================================\n";
+  std::cout << "Membership List with Ring IDs\n";
+  std::cout << "========================================\n";
+  std::cout << std::left << std::setw(20) << "Ring ID"
+            << std::setw(30) << "Node"
+            << std::setw(10) << "Status"
+            << std::setw(10) << "Inc"
+            << "HB\n";
+  std::cout << "----------------------------------------\n";
+
+  // Print each member
+  for (const auto& [ring_id, member] : sorted_members) {
+    std::cout << std::left
+              << std::setw(20) << ring_id
+              << std::setw(30) << member.node_id
+              << std::setw(10) << to_string(member.status)
+              << std::setw(10) << member.incarnation
+              << member.heartbeat_counter
+              << "\n";
+  }
+
+  std::cout << "========================================\n";
+  std::cout << "Total nodes: " << sorted_members.size() << "\n";
+  std::cout << "Self ring ID: " << ring.getNodePosition(self) << "\n";
+  std::cout << "========================================\n\n";
 }

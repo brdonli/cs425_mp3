@@ -13,6 +13,7 @@
 #include "message.hpp"
 #include "shared.hpp"
 #include "socket.hpp"
+#include "consistent_hash_ring.hpp"
 
 #define HEARTBEAT_FREQ 1  // seconds
 #define PING_FREQ 1       // seconds
@@ -34,6 +35,7 @@ class Node {
   void switchModes(FailureDetectionMode mode);
 
   inline void logMemList() { mem_list.printMemList(); };
+  void logMemListWithIds();  // New function for list_mem_ids
   inline void logSelf() {
     std::stringstream ss;
     ss << mem_list.getNodeInfo(self);
@@ -104,6 +106,7 @@ class Node {
   UDPSocketConnection socket;
   NodeId self, introducer;
   MembershipList mem_list;
+  ConsistentHashRing ring;  // MP3: Consistent hash ring
   Logger& logger;
   FailureDetectionMode fd_mode;
   bool left = false, introducer_alive = false;
