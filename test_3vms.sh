@@ -23,7 +23,7 @@ echo -e "${GREEN}Launching 3 VMs for testing...${NC}"
 # Pull and build
 echo -e "${YELLOW}Updating code and building...${NC}"
 for machine in "${MACHINES[@]}"; do
-    ssh "${NETID}@${BASE_HOST}${machine}.${DOMAIN}" "cd ${REMOTE_DIR} && git pull origin ${GIT_BRANCH} && make -C build -j4" &
+    ssh "${NETID}@${BASE_HOST}${machine}.${DOMAIN}" "cd ${REMOTE_DIR} && git pull origin ${GIT_BRANCH} && make -j4" &
 done
 wait
 echo -e "${GREEN}✓ Ready${NC}"

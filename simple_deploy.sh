@@ -18,7 +18,7 @@ echo -e "${GREEN}Deploying code to all machines...${NC}"
 
 for machine in "${MACHINES[@]}"; do
     echo -e "${YELLOW}Deploying to ${BASE_HOST}${machine}...${NC}"
-    ssh "${NETID}@${BASE_HOST}${machine}.${DOMAIN}" "cd ${REMOTE_DIR} && git pull origin ${GIT_BRANCH} && make -C build -j4" &
+    ssh "${NETID}@${BASE_HOST}${machine}.${DOMAIN}" "cd ${REMOTE_DIR} && git pull origin ${GIT_BRANCH} && make -j4" &
 done
 
 wait

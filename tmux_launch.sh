@@ -38,7 +38,7 @@ tmux kill-session -t ${SESSION_NAME} 2>/dev/null
 # Update code on all VMs first
 echo -e "${YELLOW}Updating code on all VMs...${NC}"
 for machine in "${MACHINES[@]}"; do
-    ssh "${NETID}@${BASE_HOST}${machine}.${DOMAIN}" "cd ${REMOTE_DIR} && git pull origin ${GIT_BRANCH} && make -C build -j4" &
+    ssh "${NETID}@${BASE_HOST}${machine}.${DOMAIN}" "cd ${REMOTE_DIR} && git pull origin ${GIT_BRANCH} && make -j4" &
 done
 wait
 echo -e "${GREEN}✓ All VMs updated${NC}"

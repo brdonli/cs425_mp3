@@ -68,13 +68,13 @@ wait
 echo -e "${GREEN}✓ Repository cloned on all machines${NC}"
 
 echo ""
-echo -e "${YELLOW}Step 3: Setting up build system on all VMs...${NC}"
+echo -e "${YELLOW}Step 3: Building on all VMs...${NC}"
 for machine in "${MACHINES[@]}"; do
-    echo "Setting up ${BASE_HOST}${machine}..."
-    run_remote "$machine" "cd ${REMOTE_DIR} && module load cmake && cmake -S . -B build && make -C build -j4" &
+    echo "Building on ${BASE_HOST}${machine}..."
+    run_remote "$machine" "cd ${REMOTE_DIR} && make -j4" &
 done
 wait
-echo -e "${GREEN}✓ Build setup completed on all machines${NC}"
+echo -e "${GREEN}✓ Build completed on all machines${NC}"
 
 echo ""
 echo -e "${GREEN}========================================${NC}"

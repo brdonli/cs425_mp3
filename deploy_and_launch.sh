@@ -45,7 +45,7 @@ echo ""
 echo -e "${YELLOW}Step 2: Building on all machines...${NC}"
 for machine in "${MACHINES[@]}"; do
     echo -e "Building on ${BASE_HOST}${machine}..."
-    run_remote "$machine" "cd ${REMOTE_DIR} && make -C build -j4" &
+    run_remote "$machine" "cd ${REMOTE_DIR} && make -j4" &
 done
 wait
 echo -e "${GREEN}✓ Build completed on all machines${NC}"
