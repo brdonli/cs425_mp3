@@ -25,6 +25,11 @@ Node::Node(const std::string_view& host, const std::string_view& port, NodeId& i
   socket.initializeUDPConnection();
   introducer_alive = (std::strcmp(introducer.host, self.host) == 0 &&
                       std::strcmp(introducer.port, self.port) == 0);
+
+  // MP3: Initialize file system components
+  std::string storage_dir = "./hydfs_storage_" + std::string(host) + "_" + std::string(port);
+  file_store_ = std::make_unique<FileStore>(storage_dir);
+  file_handler_ = std::make_unique<FileOperationsHandler>(*file_store_, ring, self, logger, socket);
 }
 
 void Node::handleIncoming() {

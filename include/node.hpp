@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string_view>
 #include <random>
@@ -14,6 +15,8 @@
 #include "shared.hpp"
 #include "socket.hpp"
 #include "consistent_hash_ring.hpp"
+#include "file_store.hpp"
+#include "file_operations_handler.hpp"
 
 #define HEARTBEAT_FREQ 1  // seconds
 #define PING_FREQ 1       // seconds
@@ -77,6 +80,9 @@ class Node {
     logger.log(protocol);
   }
 
+  // File operations
+  FileOperationsHandler* getFileHandler() { return file_handler_.get(); }
+
  private:
   void handleJoin(std::array<char, UDPSocketConnection::BUFFER_LEN>& buffer,
                   struct sockaddr_in& client_addr, MembershipInfo& new_node);
@@ -111,4 +117,8 @@ class Node {
   FailureDetectionMode fd_mode;
   bool left = false, introducer_alive = false;
   float drop_rate = 0.0f;
+
+  // MP3: File system components
+  std::unique_ptr<FileStore> file_store_;
+  std::unique_ptr<FileOperationsHandler> file_handler_;
 };

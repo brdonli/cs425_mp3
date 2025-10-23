@@ -24,6 +24,8 @@ add_library(core
     src/consistent_hash_ring.cpp
     src/file_store.cpp
     src/client_tracker.cpp
+    src/file_message.cpp
+    src/file_operations_handler.cpp
 )
 
 # --- Applications ---

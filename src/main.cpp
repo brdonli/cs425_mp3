@@ -66,6 +66,34 @@ int main(int argc, char* argv[]) {
       node.switchModes(new_fd_mode);
     } else if (input == "display_protocol") {
       node.logProtocol();
+    }
+    // MP3: File operations commands
+    else if (input == "create") {
+      std::string local_file, hydfs_file;
+      std::cin >> local_file >> hydfs_file;
+      node.getFileHandler()->createFile(local_file, hydfs_file);
+    } else if (input == "get") {
+      std::string hydfs_file, local_file;
+      std::cin >> hydfs_file >> local_file;
+      node.getFileHandler()->getFile(hydfs_file, local_file);
+    } else if (input == "append") {
+      std::string local_file, hydfs_file;
+      std::cin >> local_file >> hydfs_file;
+      node.getFileHandler()->appendFile(local_file, hydfs_file);
+    } else if (input == "merge") {
+      std::string hydfs_file;
+      std::cin >> hydfs_file;
+      node.getFileHandler()->mergeFile(hydfs_file);
+    } else if (input == "ls") {
+      std::string hydfs_file;
+      std::cin >> hydfs_file;
+      node.getFileHandler()->listFileLocations(hydfs_file);
+    } else if (input == "store") {
+      node.getFileHandler()->listLocalFiles();
+    } else if (input == "getfromreplica") {
+      std::string vm_address, hydfs_file, local_file;
+      std::cin >> vm_address >> hydfs_file >> local_file;
+      node.getFileHandler()->getFileFromReplica(vm_address, hydfs_file, local_file);
     } else {
       std::cerr << "INVALID COMMAND" << std::endl;
     }
