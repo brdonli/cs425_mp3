@@ -127,10 +127,17 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
 
   // Get replicas for this file (the n=3 successors in the ring)
   std::vector<NodeId> replicas = hash_ring_.getFileReplicas(hydfs_filename, 3);
+
+  std::cout << "\n=== HASH RING STATUS ===" << std::endl;
+  std::cout << "Total nodes in ring: " << hash_ring_.size() << std::endl;
+  std::cout << "Replicas for '" << hydfs_filename << "': " << replicas.size() << std::endl;
+
   if (replicas.empty()) {
-    std::cout << "No replicas available in the ring\n";
+    std::cout << "❌ ERROR: No replicas available in the ring!" << std::endl;
+    std::cout << "Make sure other VMs have joined the network." << std::endl;
     return false;
   }
+  std::cout << "========================\n" << std::endl;
 
   // Create the initial file block
   FileBlock initial_block;
@@ -198,14 +205,17 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
     std::memset(&dest_addr, 0, sizeof(dest_addr));
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_port = htons(std::atoi(replica.port));
-    inet_pton(AF_INET, replica.host, &dest_addr.sin_addr);
+    int inet_result = inet_pton(AF_INET, replica.host, &dest_addr.sin_addr);
 
-    std::cout << "  [SEND] Sending to " << replica.host << ":" << replica.port << "... ";
+    std::cout << "  [SEND] Sending to " << replica.host << ":" << replica.port << std::endl;
+    std::cout << "         inet_pton result: " << inet_result << " (1=success, 0=invalid, -1=error)" << std::endl;
+    std::cout << "         Port (network byte order): " << ntohs(dest_addr.sin_port) << std::endl;
+
     if (sendFileMessage(FileMessageType::CREATE_REQUEST, buffer, size, dest_addr)) {
-      std::cout << "✅ SUCCESS" << std::endl;
+      std::cout << "         Result: ✅ SUCCESS" << std::endl;
       sent_count++;
     } else {
-      std::cout << "❌ FAILED" << std::endl;
+      std::cout << "         Result: ❌ FAILED" << std::endl;
       logger_.log("Failed to send create request to " + std::string(replica.host) + ":" +
                   std::string(replica.port));
     }
