@@ -31,10 +31,11 @@ struct FileMetadata {
 
 /**
  * Message types for HyDFS file operations
+ * NOTE: Values start at 100 to distinguish from membership MessageType (0-5)
  */
 enum class FileMessageType : uint8_t {
   // Core file operations
-  CREATE_REQUEST,           // Request to create a new file
+  CREATE_REQUEST = 100,     // Request to create a new file
   CREATE_RESPONSE,          // Response to create request
   GET_REQUEST,              // Request to fetch a file
   GET_RESPONSE,             // Response with file data

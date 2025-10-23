@@ -14,6 +14,7 @@
 #include "message.hpp"
 #include "shared.hpp"
 #include "socket.hpp"
+#include "file_metadata.hpp"
 
 Node::Node(const std::string_view& host, const std::string_view& port, NodeId& introducer,
            Logger& logger) :
@@ -57,34 +58,49 @@ void Node::handleIncoming() {
     if (bytes_read <= 0) continue;
 
     if (dist(gen) >= drop_rate) {
-      message = Message::deserialize(buffer.data(), UDPSocketConnection::BUFFER_LEN);
+      // Check first byte to determine message type
+      // File messages have type >= 100, membership messages have type 0-5
+      uint8_t first_byte = static_cast<uint8_t>(buffer[0]);
 
-      // handle messages
-      switch (message.type) {
-        case MessageType::PING: {
-          handlePing(buffer, client_addr, message.messages.at(0));
-          break;
+      if (first_byte >= 100) {
+        // This is a file message - route to file handler
+        FileMessageType file_type = static_cast<FileMessageType>(first_byte);
+        if (file_handler_) {
+          file_handler_->handleFileMessage(file_type, buffer.data() + 1, bytes_read - 1,
+                                           client_addr);
         }
-        case MessageType::ACK:
-          handleAck(message.messages.at(0));
-          break;
-        case MessageType::GOSSIP: {
-          std::vector<MembershipInfo> updates = handleGossip(message);
-          sendGossip(buffer, updates);  // notify network about refutation
-          break;
+      } else {
+        // This is a membership message
+        message = Message::deserialize(buffer.data(), UDPSocketConnection::BUFFER_LEN);
+
+        // handle messages
+        switch (message.type) {
+          case MessageType::PING: {
+            handlePing(buffer, client_addr, message.messages.at(0));
+            break;
+          }
+          case MessageType::ACK:
+            handleAck(message.messages.at(0));
+            break;
+          case MessageType::GOSSIP: {
+            std::vector<MembershipInfo> updates = handleGossip(message);
+            sendGossip(buffer, updates);  // notify network about refutation
+            break;
+          }
+          case MessageType::JOIN:
+            handleJoin(buffer, client_addr, message.messages.at(0));
+            break;
+          case MessageType::LEAVE:
+            handleLeave(message.messages.at(0));
+            break;
+          case MessageType::SWITCH:
+            handleSwitch(message);
+            break;
+          default:
+            std::cerr << "Unknown membership message type: " << static_cast<int>(message.type)
+                      << std::endl;
+            break;
         }
-        case MessageType::JOIN:
-          handleJoin(buffer, client_addr, message.messages.at(0));
-          break;
-        case MessageType::LEAVE:
-          handleLeave(message.messages.at(0));
-          break;
-        case MessageType::SWITCH:
-          handleSwitch(message);
-          break;
-        default:
-          std::cerr << "something has gone fcking wrong" << std::endl;
-          break;
       }
     } else {
       logger.log("Dropped incoming message due to drop_rate");
