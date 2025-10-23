@@ -22,7 +22,9 @@ CORE_SRCS = $(SRC_DIR)/socket.cpp \
             $(SRC_DIR)/file_metadata.cpp \
             $(SRC_DIR)/consistent_hash_ring.cpp \
             $(SRC_DIR)/file_store.cpp \
-            $(SRC_DIR)/client_tracker.cpp
+            $(SRC_DIR)/client_tracker.cpp \
+            $(SRC_DIR)/file_message.cpp \
+            $(SRC_DIR)/file_operations_handler.cpp
 
 CORE_OBJS = $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(CORE_SRCS))
 
