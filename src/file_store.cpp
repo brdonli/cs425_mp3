@@ -11,6 +11,27 @@ FileStore::FileStore(const std::string& storage_dir) : storage_dir(storage_dir) 
   std::filesystem::create_directories(storage_dir);
   std::filesystem::create_directories(storage_dir + "/metadata");
   std::filesystem::create_directories(storage_dir + "/blocks");
+
+  // Load existing files from disk (for crash recovery)
+  std::string metadata_dir = storage_dir + "/metadata";
+  if (std::filesystem::exists(metadata_dir)) {
+    for (const auto& entry : std::filesystem::directory_iterator(metadata_dir)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".meta") {
+        // Extract filename from path (remove .meta extension)
+        std::string filename = entry.path().stem().string();
+        loadMetadata(filename);
+
+        // Load all blocks referenced by this metadata
+        auto it = files.find(filename);
+        if (it != files.end()) {
+          for (uint64_t block_id : it->second.block_ids) {
+            loadBlock(block_id);
+          }
+        }
+      }
+    }
+    std::cout << "Loaded " << files.size() << " file(s) from disk at startup" << std::endl;
+  }
 }
 
 bool FileStore::createFile(const std::string& filename, const std::vector<char>& data,
@@ -239,22 +260,92 @@ bool FileStore::storeFile(const FileMetadata& metadata, const std::vector<FileBl
   return true;
 }
 
-void FileStore::persistMetadata(const std::string& /* filename */) {
-  // TODO: Implement actual disk persistence if needed
-  // For now, keeping data in memory
+void FileStore::persistMetadata(const std::string& filename) {
+  auto it = files.find(filename);
+  if (it == files.end()) {
+    return;  // File doesn't exist in memory
+  }
+
+  std::string path = getMetadataPath(filename);
+  std::ofstream file(path, std::ios::binary);
+  if (!file.is_open()) {
+    std::cerr << "Failed to persist metadata for: " << filename << std::endl;
+    return;
+  }
+
+  // Serialize metadata to buffer
+  char buffer[65536];
+  size_t size = it->second.serialize(buffer, sizeof(buffer));
+
+  if (size > 0) {
+    file.write(buffer, size);
+  }
 }
 
-void FileStore::persistBlock(uint64_t /* block_id */) {
-  // TODO: Implement actual disk persistence if needed
-  // For now, keeping data in memory
+void FileStore::persistBlock(uint64_t block_id) {
+  auto it = blocks.find(block_id);
+  if (it == blocks.end()) {
+    return;  // Block doesn't exist in memory
+  }
+
+  std::string path = getBlockPath(block_id);
+  std::ofstream file(path, std::ios::binary);
+  if (!file.is_open()) {
+    std::cerr << "Failed to persist block: " << block_id << std::endl;
+    return;
+  }
+
+  // Serialize block to buffer
+  char buffer[65536];
+  size_t size = it->second.serialize(buffer, sizeof(buffer));
+
+  if (size > 0) {
+    file.write(buffer, size);
+  }
 }
 
-void FileStore::loadMetadata(const std::string& /* filename */) {
-  // TODO: Implement loading from disk if persistence is implemented
+void FileStore::loadMetadata(const std::string& filename) {
+  std::string path = getMetadataPath(filename);
+  std::ifstream file(path, std::ios::binary | std::ios::ate);
+  if (!file.is_open()) {
+    return;  // File doesn't exist on disk
+  }
+
+  // Read file contents
+  std::streamsize size = file.tellg();
+  file.seekg(0, std::ios::beg);
+
+  std::vector<char> buffer(size);
+  if (!file.read(buffer.data(), size)) {
+    std::cerr << "Failed to read metadata file: " << filename << std::endl;
+    return;
+  }
+
+  // Deserialize and store in memory
+  FileMetadata metadata = FileMetadata::deserialize(buffer.data(), buffer.size());
+  files[filename] = metadata;
 }
 
-void FileStore::loadBlock(uint64_t /* block_id */) {
-  // TODO: Implement loading from disk if persistence is implemented
+void FileStore::loadBlock(uint64_t block_id) {
+  std::string path = getBlockPath(block_id);
+  std::ifstream file(path, std::ios::binary | std::ios::ate);
+  if (!file.is_open()) {
+    return;  // File doesn't exist on disk
+  }
+
+  // Read file contents
+  std::streamsize size = file.tellg();
+  file.seekg(0, std::ios::beg);
+
+  std::vector<char> buffer(size);
+  if (!file.read(buffer.data(), size)) {
+    std::cerr << "Failed to read block file: " << block_id << std::endl;
+    return;
+  }
+
+  // Deserialize and store in memory
+  FileBlock block = FileBlock::deserialize(buffer.data(), buffer.size());
+  blocks[block_id] = block;
 }
 
 std::string FileStore::getMetadataPath(const std::string& filename) const {
