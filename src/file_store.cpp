@@ -38,8 +38,11 @@ bool FileStore::createFile(const std::string& filename, const std::vector<char>&
                            const std::string& client_id) {
   std::unique_lock<std::shared_mutex> lock(mtx);
 
+  std::cout << "[FILE_STORE] createFile called: " << filename << " (" << data.size() << " bytes)" << std::endl;
+
   // Check if file already exists
   if (files.find(filename) != files.end()) {
+    std::cout << "[FILE_STORE] File already exists: " << filename << std::endl;
     return false;  // File already exists
   }
 
@@ -75,15 +78,19 @@ bool FileStore::createFile(const std::string& filename, const std::vector<char>&
   files[filename] = metadata;
   persistMetadata(filename);
 
+  std::cout << "[FILE_STORE] File created successfully in memory: " << filename << std::endl;
   return true;
 }
 
 bool FileStore::appendBlock(const std::string& filename, const FileBlock& block) {
   std::unique_lock<std::shared_mutex> lock(mtx);
 
+  std::cout << "[FILE_STORE] appendBlock called: " << filename << " (block " << block.block_id << ")" << std::endl;
+
   // Check if file exists
   auto it = files.find(filename);
   if (it == files.end()) {
+    std::cout << "[FILE_STORE] File not found for append: " << filename << std::endl;
     return false;  // File doesn't exist
   }
 
@@ -101,6 +108,7 @@ bool FileStore::appendBlock(const std::string& filename, const FileBlock& block)
   persistBlock(block.block_id);
   persistMetadata(filename);
 
+  std::cout << "[FILE_STORE] Block appended successfully: " << filename << std::endl;
   return true;
 }
 
@@ -263,13 +271,14 @@ bool FileStore::storeFile(const FileMetadata& metadata, const std::vector<FileBl
 void FileStore::persistMetadata(const std::string& filename) {
   auto it = files.find(filename);
   if (it == files.end()) {
+    std::cerr << "[PERSIST] Metadata not found in memory for: " << filename << std::endl;
     return;  // File doesn't exist in memory
   }
 
   std::string path = getMetadataPath(filename);
   std::ofstream file(path, std::ios::binary);
   if (!file.is_open()) {
-    std::cerr << "Failed to persist metadata for: " << filename << std::endl;
+    std::cerr << "[PERSIST] Failed to open metadata file for writing: " << path << std::endl;
     return;
   }
 
@@ -279,19 +288,24 @@ void FileStore::persistMetadata(const std::string& filename) {
 
   if (size > 0) {
     file.write(buffer, size);
+    file.close();
+    std::cout << "[PERSIST] Wrote metadata to: " << path << " (" << size << " bytes)" << std::endl;
+  } else {
+    std::cerr << "[PERSIST] Failed to serialize metadata for: " << filename << std::endl;
   }
 }
 
 void FileStore::persistBlock(uint64_t block_id) {
   auto it = blocks.find(block_id);
   if (it == blocks.end()) {
+    std::cerr << "[PERSIST] Block not found in memory: " << block_id << std::endl;
     return;  // Block doesn't exist in memory
   }
 
   std::string path = getBlockPath(block_id);
   std::ofstream file(path, std::ios::binary);
   if (!file.is_open()) {
-    std::cerr << "Failed to persist block: " << block_id << std::endl;
+    std::cerr << "[PERSIST] Failed to open block file for writing: " << path << std::endl;
     return;
   }
 
@@ -301,6 +315,10 @@ void FileStore::persistBlock(uint64_t block_id) {
 
   if (size > 0) {
     file.write(buffer, size);
+    file.close();
+    std::cout << "[PERSIST] Wrote block to: " << path << " (" << size << " bytes)" << std::endl;
+  } else {
+    std::cerr << "[PERSIST] Failed to serialize block: " << block_id << std::endl;
   }
 }
 

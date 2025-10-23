@@ -534,13 +534,27 @@ void FileOperationsHandler::handleListStoreRequest(const ListStoreRequest& /* re
 
 void FileOperationsHandler::handleReplicateBlock(const ReplicateBlockMessage& msg,
                                                   const struct sockaddr_in& sender) {
+  std::cout << "\n=== RECEIVED REPLICATE_BLOCK ===" << std::endl;
+  std::cout << "Filename: " << msg.hydfs_filename << std::endl;
+  std::cout << "Block ID: " << msg.block.block_id << std::endl;
+  std::cout << "Client ID: " << msg.block.client_id << std::endl;
+  std::cout << "Data size: " << msg.block.size << " bytes" << std::endl;
+
   // Store the replicated block
   bool success = file_store_.appendBlock(msg.hydfs_filename, msg.block);
 
   if (!success) {
+    std::cout << "File doesn't exist, creating new file..." << std::endl;
     // Try to create the file first (in case it doesn't exist yet)
     success = file_store_.createFile(msg.hydfs_filename, msg.block.data, msg.block.client_id);
   }
+
+  if (success) {
+    std::cout << "✅ Block replicated successfully" << std::endl;
+  } else {
+    std::cout << "❌ Block replication FAILED" << std::endl;
+  }
+  std::cout << "================================\n" << std::endl;
 
   logger_.log("Replicated block for file: " + msg.hydfs_filename +
               (success ? " [SUCCESS]" : " [FAILED]"));
