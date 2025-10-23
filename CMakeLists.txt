@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE Release)
 
+# Fix for GCC dual ABI issue on Linux
+add_definitions(-D_GLIBCXX_USE_CXX11_ABI=1)
+
 add_compile_options(-Wall -Wextra -Wpedantic -Werror -Werror=missing-include-dirs)
 
 # Include directories
