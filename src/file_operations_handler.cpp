@@ -125,12 +125,24 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
     return false;
   }
 
-  // Get replicas for this file
+  // Get replicas for this file (the n=3 successors in the ring)
   std::vector<NodeId> replicas = hash_ring_.getFileReplicas(hydfs_filename, 3);
   if (replicas.empty()) {
     std::cout << "No replicas available in the ring\n";
     return false;
   }
+
+  // Create the initial file block
+  FileBlock initial_block;
+  initial_block.client_id = getClientId();
+  initial_block.sequence_num = 0;
+  auto now = std::chrono::system_clock::now();
+  initial_block.timestamp =
+      std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+  initial_block.data = data;
+  initial_block.size = data.size();
+  initial_block.block_id =
+      FileBlock::generateBlockId(initial_block.client_id, initial_block.timestamp, 0);
 
   // Check if we are one of the replicas
   bool we_are_replica = false;
@@ -142,57 +154,57 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
   }
 
   if (we_are_replica) {
-    // Store locally
+    // Store locally first
     bool success = file_store_.createFile(hydfs_filename, data, getClientId());
     if (!success) {
       std::cout << "File already exists in HyDFS\n";
       return false;
     }
+    logger_.log("Created file locally: " + hydfs_filename);
+  }
 
-    // Replicate to other nodes
-    FileBlock initial_block;
-    initial_block.client_id = getClientId();
-    initial_block.sequence_num = 0;
-    auto now = std::chrono::system_clock::now();
-    initial_block.timestamp =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    initial_block.data = data;
-    initial_block.size = data.size();
-    initial_block.block_id =
-        FileBlock::generateBlockId(initial_block.client_id, initial_block.timestamp, 0);
+  // Send CREATE_REQUEST to all replicas (including ourselves if we're not one)
+  // This ensures ANY VM can initiate a create operation
+  std::cout << "Sending create request to " << replicas.size() << " replica(s)...\n";
 
-    // Send replication requests and wait inline for small delay to ensure delivery
-    std::cout << "Replicating to " << (replicas.size() - 1) << " other replica(s)...\n";
-    replicateBlock(hydfs_filename, initial_block, replicas);
+  CreateFileRequest req;
+  req.hydfs_filename = hydfs_filename;
+  req.local_filename = local_filename;
+  req.client_id = hash_ring_.getNodePosition(self_id_);  // Use uint64_t position
+  req.data = data;
+  req.data_size = data.size();
 
-    // Small delay to allow replication messages to be sent
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  char buffer[65536];
+  size_t size = req.serialize(buffer, sizeof(buffer));
 
-    std::cout << "File created successfully and replicated to " << replicas.size()
-              << " replica(s): " << hydfs_filename << "\n";
-    return true;
-  } else {
-    // Forward request to coordinator (first replica)
-    CreateFileRequest req;
-    req.hydfs_filename = hydfs_filename;
-    req.local_filename = local_filename;
-    req.client_id = hash_ring_.getNodePosition(self_id_);
-    req.data = data;
-    req.data_size = data.size();
-
-    char buffer[65536];
-    size_t size = req.serialize(buffer, sizeof(buffer));
+  int sent_count = 0;
+  for (const auto& replica : replicas) {
+    // Skip self if we already stored locally
+    if (replica == self_id_ && we_are_replica) {
+      sent_count++;
+      continue;
+    }
 
     struct sockaddr_in dest_addr;
     std::memset(&dest_addr, 0, sizeof(dest_addr));
     dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(std::atoi(replicas[0].port));
-    inet_pton(AF_INET, replicas[0].host, &dest_addr.sin_addr);
+    dest_addr.sin_port = htons(std::atoi(replica.port));
+    inet_pton(AF_INET, replica.host, &dest_addr.sin_addr);
 
-    sendFileMessage(FileMessageType::CREATE_REQUEST, buffer, size, dest_addr);
-    std::cout << "Create request sent to coordinator\n";
-    return true;
+    if (sendFileMessage(FileMessageType::CREATE_REQUEST, buffer, size, dest_addr)) {
+      sent_count++;
+    } else {
+      logger_.log("Failed to send create request to " + std::string(replica.host) + ":" +
+                  std::string(replica.port));
+    }
   }
+
+  // Small delay to allow create requests to be processed
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  std::cout << "File created successfully and sent to " << sent_count << " replica(s): "
+            << hydfs_filename << "\n";
+  return true;
 }
 
 bool FileOperationsHandler::getFile(const std::string& hydfs_filename,
@@ -360,8 +372,19 @@ bool FileOperationsHandler::getFileFromReplica(const std::string& vm_address,
 
 void FileOperationsHandler::handleCreateRequest(const CreateFileRequest& req,
                                                 const struct sockaddr_in& sender) {
-  bool success = file_store_.createFile(req.hydfs_filename, req.data, getClientId());
+  // Convert client_id from uint64_t to string
+  std::string client_id_str = std::to_string(req.client_id);
 
+  // Store the file locally - the client has already sent this to all replicas
+  bool success = file_store_.createFile(req.hydfs_filename, req.data, client_id_str);
+
+  if (success) {
+    logger_.log("File created successfully from remote request: " + req.hydfs_filename);
+  } else {
+    logger_.log("File creation failed (may already exist): " + req.hydfs_filename);
+  }
+
+  // Send response back to the requesting client
   CreateFileResponse resp;
   resp.success = success;
   resp.file_id = FileMetadata::generateFileId(req.hydfs_filename);
@@ -373,23 +396,6 @@ void FileOperationsHandler::handleCreateRequest(const CreateFileRequest& req,
   char buffer[65536];
   size_t size = resp.serialize(buffer, sizeof(buffer));
   sendFileMessage(FileMessageType::CREATE_RESPONSE, buffer, size, sender);
-
-  // If successful and we're coordinator, replicate to others
-  if (success && isCoordinator(req.hydfs_filename)) {
-    std::vector<NodeId> replicas = hash_ring_.getFileReplicas(req.hydfs_filename, 3);
-    FileBlock initial_block;
-    initial_block.client_id = getClientId();
-    initial_block.sequence_num = 0;
-    auto now = std::chrono::system_clock::now();
-    initial_block.timestamp =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    initial_block.data = req.data;
-    initial_block.size = req.data.size();
-    initial_block.block_id =
-        FileBlock::generateBlockId(initial_block.client_id, initial_block.timestamp, 0);
-
-    replicateBlock(req.hydfs_filename, initial_block, replicas);
-  }
 }
 
 void FileOperationsHandler::handleGetRequest(const GetFileRequest& req,
