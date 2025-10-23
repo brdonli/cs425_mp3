@@ -30,7 +30,37 @@ int main(int argc, char* argv[]) {
   std::string input;
   while (true) {
     std::cin >> input;
-    if (input == "list_mem") {
+    if (input == "help") {
+      std::cout << "\n=== HyDFS Commands ===\n\n";
+      std::cout << "File Operations:\n";
+      std::cout << "  create <localfile> <hydfsfile>   - Create file in HyDFS from local file\n";
+      std::cout << "  get <hydfsfile> <localfile>      - Get file from HyDFS to local file\n";
+      std::cout << "  append <localfile> <hydfsfile>   - Append local file to HyDFS file\n";
+      std::cout << "  merge <hydfsfile>                - Merge all replicas of a file\n";
+      std::cout << "  ls <hydfsfile>                   - List all VMs storing the file\n";
+      std::cout << "  store                            - List all files stored on this node\n";
+      std::cout << "  getfromreplica <vm:port> <hydfsfile> <localfile>\n";
+      std::cout << "                                   - Get file from specific replica\n";
+      std::cout << "\nMembership Operations:\n";
+      std::cout << "  join                             - Join the network\n";
+      std::cout << "  leave                            - Leave the network and exit\n";
+      std::cout << "  list_mem                         - List all members\n";
+      std::cout << "  list_mem_ids                     - List members with ring IDs\n";
+      std::cout << "  list_self                        - Display info about this node\n";
+      std::cout << "  display_suspects                 - Show suspected nodes\n";
+      std::cout << "  display_protocol                 - Show current failure detection mode\n";
+      std::cout << "  switch <gossip|ping> <suspect|nosuspect>\n";
+      std::cout << "                                   - Switch failure detection mode\n";
+      std::cout << "\nOther:\n";
+      std::cout << "  help                             - Show this help message\n";
+      std::cout << "\nExamples:\n";
+      std::cout << "  create test.txt myfile.txt\n";
+      std::cout << "  get myfile.txt downloaded.txt\n";
+      std::cout << "  append data.txt myfile.txt\n";
+      std::cout << "  ls myfile.txt\n";
+      std::cout << "  getfromreplica localhost:12345 myfile.txt local.txt\n";
+      std::cout << "\n";
+    } else if (input == "list_mem") {
       node.logMemList();
     } else if (input == "list_mem_ids") {
       node.logMemListWithIds();

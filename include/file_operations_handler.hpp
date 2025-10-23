@@ -39,7 +39,7 @@ class FileOperationsHandler {
   void handleMergeRequest(const MergeFileRequest& req, const struct sockaddr_in& sender);
   void handleLsRequest(const LsFileRequest& req, const struct sockaddr_in& sender);
   void handleListStoreRequest(const ListStoreRequest& req, const struct sockaddr_in& sender);
-  void handleReplicateBlock(const ReplicateBlockMessage& msg);
+  void handleReplicateBlock(const ReplicateBlockMessage& msg, const struct sockaddr_in& sender);
   void handleCollectBlocksRequest(const CollectBlocksRequest& req,
                                   const struct sockaddr_in& sender);
   void handleMergeUpdate(const MergeUpdateMessage& msg);
@@ -82,4 +82,22 @@ class FileOperationsHandler {
   // Tracking sequence numbers per file
   std::unordered_map<std::string, uint32_t> sequence_numbers_;
   std::mutex seq_mtx_;
+
+  // Pending replication tracking for synchronous operations
+  struct PendingReplication {
+    std::string filename;
+    size_t expected_acks;
+    size_t received_acks;
+    bool success;
+    std::mutex mtx;
+    std::condition_variable cv;
+  };
+  std::unordered_map<std::string, std::shared_ptr<PendingReplication>> pending_replications_;
+  std::mutex pending_mtx_;
+
+  // Helper: Wait for replication acknowledgments
+  bool waitForReplicationAcks(const std::string& filename, size_t expected_acks, int timeout_ms = 5000);
+
+  // Helper: Record replication acknowledgment
+  void recordReplicationAck(const std::string& filename, bool success);
 };
