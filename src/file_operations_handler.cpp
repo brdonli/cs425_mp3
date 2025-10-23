@@ -77,7 +77,15 @@ bool FileOperationsHandler::sendFileMessage(FileMessageType type, const char* bu
   msg_buffer[0] = static_cast<uint8_t>(type);
   std::memcpy(msg_buffer.data() + 1, buffer, std::min(buffer_size, msg_buffer.size() - 1));
 
+  char dest_ip[INET_ADDRSTRLEN];
+  inet_ntop(AF_INET, &(dest.sin_addr), dest_ip, INET_ADDRSTRLEN);
+  std::cout << "[SEND_FILE_MSG] Type: " << static_cast<int>(type)
+            << " to " << dest_ip << ":" << ntohs(dest.sin_port)
+            << " size: " << (buffer_size + 1) << " bytes" << std::endl;
+
   ssize_t sent = socket_.write_to_socket(msg_buffer, buffer_size + 1, dest);
+
+  std::cout << "[SEND_FILE_MSG] Sent " << sent << " bytes (expected " << (buffer_size + 1) << ")" << std::endl;
 
   return sent > 0;
 }
@@ -99,10 +107,7 @@ bool FileOperationsHandler::replicateBlock(const std::string& hydfs_filename,
     }
 
     struct sockaddr_in dest_addr;
-    std::memset(&dest_addr, 0, sizeof(dest_addr));
-    dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(std::atoi(replica.port));
-    inet_pton(AF_INET, replica.host, &dest_addr.sin_addr);
+    socket_.buildServerAddr(dest_addr, replica.host, replica.port);
 
     if (!sendFileMessage(FileMessageType::REPLICATE_BLOCK, buffer, size, dest_addr)) {
       logger_.log("Failed to replicate block to " + std::string(replica.host) + ":" +
@@ -202,13 +207,9 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
     }
 
     struct sockaddr_in dest_addr;
-    std::memset(&dest_addr, 0, sizeof(dest_addr));
-    dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(std::atoi(replica.port));
-    int inet_result = inet_pton(AF_INET, replica.host, &dest_addr.sin_addr);
+    socket_.buildServerAddr(dest_addr, replica.host, replica.port);
 
     std::cout << "  [SEND] Sending to " << replica.host << ":" << replica.port << std::endl;
-    std::cout << "         inet_pton result: " << inet_result << " (1=success, 0=invalid, -1=error)" << std::endl;
     std::cout << "         Port (network byte order): " << ntohs(dest_addr.sin_port) << std::endl;
 
     if (sendFileMessage(FileMessageType::CREATE_REQUEST, buffer, size, dest_addr)) {
@@ -381,10 +382,7 @@ bool FileOperationsHandler::getFileFromReplica(const std::string& vm_address,
   size_t size = req.serialize(buffer, sizeof(buffer));
 
   struct sockaddr_in dest_addr;
-  std::memset(&dest_addr, 0, sizeof(dest_addr));
-  dest_addr.sin_family = AF_INET;
-  dest_addr.sin_port = htons(std::atoi(port.c_str()));
-  inet_pton(AF_INET, host.c_str(), &dest_addr.sin_addr);
+  socket_.buildServerAddr(dest_addr, host.c_str(), port.c_str());
 
   sendFileMessage(FileMessageType::GET_REQUEST, buffer, size, dest_addr);
   std::cout << "Get request sent to " << vm_address << "\n";
@@ -592,9 +590,16 @@ void FileOperationsHandler::handleMergeUpdate(const MergeUpdateMessage& msg) {
 void FileOperationsHandler::handleFileMessage(FileMessageType type, const char* buffer,
                                               size_t buffer_size,
                                               const struct sockaddr_in& sender) {
+  char sender_ip[INET_ADDRSTRLEN];
+  inet_ntop(AF_INET, &(sender.sin_addr), sender_ip, INET_ADDRSTRLEN);
+  std::cout << "[HANDLE_FILE_MSG] Routing message type " << static_cast<int>(type)
+            << " from " << sender_ip << ":" << ntohs(sender.sin_port)
+            << " (" << buffer_size << " bytes)" << std::endl;
+
   try {
     switch (type) {
       case FileMessageType::CREATE_REQUEST: {
+        std::cout << "[HANDLE_FILE_MSG] Dispatching to handleCreateRequest" << std::endl;
         CreateFileRequest req = CreateFileRequest::deserialize(buffer, buffer_size);
         handleCreateRequest(req, sender);
         break;
@@ -625,6 +630,7 @@ void FileOperationsHandler::handleFileMessage(FileMessageType type, const char* 
         break;
       }
       case FileMessageType::REPLICATE_BLOCK: {
+        std::cout << "[HANDLE_FILE_MSG] Dispatching to handleReplicateBlock" << std::endl;
         ReplicateBlockMessage msg = ReplicateBlockMessage::deserialize(buffer, buffer_size);
         handleReplicateBlock(msg, sender);
         break;
