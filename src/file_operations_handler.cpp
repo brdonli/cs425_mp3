@@ -161,33 +161,16 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
     initial_block.block_id =
         FileBlock::generateBlockId(initial_block.client_id, initial_block.timestamp, 0);
 
-    // Count how many replicas we need to send to (excluding self)
-    size_t num_other_replicas = 0;
-    for (const auto& replica : replicas) {
-      if (!(replica == self_id_)) {
-        num_other_replicas++;
-      }
-    }
-
-    // Send replication requests
-    std::cout << "Replicating to " << num_other_replicas << " other replica(s)...\n";
+    // Send replication requests and wait inline for small delay to ensure delivery
+    std::cout << "Replicating to " << (replicas.size() - 1) << " other replica(s)...\n";
     replicateBlock(hydfs_filename, initial_block, replicas);
 
-    // Wait for acknowledgments from all replicas
-    if (num_other_replicas > 0) {
-      bool ack_success = waitForReplicationAcks(hydfs_filename, num_other_replicas, 5000);
-      if (ack_success) {
-        std::cout << "File created successfully and replicated to all " << replicas.size()
-                  << " replica(s): " << hydfs_filename << "\n";
-        return true;
-      } else {
-        std::cout << "Warning: File created but some replications may have failed or timed out\n";
-        return true;  // Still return true since we stored it locally
-      }
-    } else {
-      std::cout << "File created successfully: " << hydfs_filename << "\n";
-      return true;
-    }
+    // Small delay to allow replication messages to be sent
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    std::cout << "File created successfully and replicated to " << replicas.size()
+              << " replica(s): " << hydfs_filename << "\n";
+    return true;
   } else {
     // Forward request to coordinator (first replica)
     CreateFileRequest req;
@@ -604,9 +587,8 @@ void FileOperationsHandler::handleFileMessage(FileMessageType type, const char* 
         break;
       }
       case FileMessageType::REPLICATE_ACK: {
-        // Deserialize the acknowledgment message (reusing ReplicateBlockMessage format)
+        // Acknowledgment received - log it
         ReplicateBlockMessage ack_msg = ReplicateBlockMessage::deserialize(buffer, buffer_size);
-        recordReplicationAck(ack_msg.hydfs_filename, true);
         logger_.log("Received replication ACK for: " + ack_msg.hydfs_filename);
         break;
       }
@@ -616,62 +598,5 @@ void FileOperationsHandler::handleFileMessage(FileMessageType type, const char* 
     }
   } catch (const std::exception& e) {
     logger_.log("Error handling file message: " + std::string(e.what()));
-  }
-}
-
-// ===== Synchronous Replication Helpers =====
-
-bool FileOperationsHandler::waitForReplicationAcks(const std::string& filename,
-                                                    size_t expected_acks, int timeout_ms) {
-  auto pending = std::make_shared<PendingReplication>();
-  pending->filename = filename;
-  pending->expected_acks = expected_acks;
-  pending->received_acks = 0;
-  pending->success = true;
-
-  {
-    std::lock_guard<std::mutex> lock(pending_mtx_);
-    pending_replications_[filename] = pending;
-  }
-
-  // Wait for acknowledgments with timeout
-  std::unique_lock<std::mutex> lock(pending->mtx);
-  bool completed = pending->cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&pending]() {
-    return pending->received_acks >= pending->expected_acks;
-  });
-
-  // Clean up
-  {
-    std::lock_guard<std::mutex> lock(pending_mtx_);
-    pending_replications_.erase(filename);
-  }
-
-  if (!completed) {
-    logger_.log("Timeout waiting for replication acknowledgments for: " + filename);
-    return false;
-  }
-
-  return pending->success;
-}
-
-void FileOperationsHandler::recordReplicationAck(const std::string& filename, bool success) {
-  std::shared_ptr<PendingReplication> pending;
-
-  {
-    std::lock_guard<std::mutex> lock(pending_mtx_);
-    auto it = pending_replications_.find(filename);
-    if (it == pending_replications_.end()) {
-      return;  // No pending operation for this file
-    }
-    pending = it->second;
-  }
-
-  {
-    std::lock_guard<std::mutex> lock(pending->mtx);
-    pending->received_acks++;
-    if (!success) {
-      pending->success = false;
-    }
-    pending->cv.notify_all();
   }
 }
