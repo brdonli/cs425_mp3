@@ -65,9 +65,13 @@ void Node::handleIncoming() {
       if (first_byte >= 100) {
         // This is a file message - route to file handler
         FileMessageType file_type = static_cast<FileMessageType>(first_byte);
+        std::cout << "[FILE MSG] Received file message type: " << static_cast<int>(first_byte)
+                  << " (" << bytes_read << " bytes)" << std::endl;
         if (file_handler_) {
           file_handler_->handleFileMessage(file_type, buffer.data() + 1, bytes_read - 1,
                                            client_addr);
+        } else {
+          std::cerr << "[ERROR] File handler is null!" << std::endl;
         }
       } else {
         // This is a membership message

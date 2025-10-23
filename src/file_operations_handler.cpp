@@ -165,7 +165,12 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
 
   // Send CREATE_REQUEST to all replicas (including ourselves if we're not one)
   // This ensures ANY VM can initiate a create operation
-  std::cout << "Sending create request to " << replicas.size() << " replica(s)...\n";
+  std::cout << "\n=== SENDING CREATE REQUESTS ===" << std::endl;
+  std::cout << "File: " << hydfs_filename << std::endl;
+  std::cout << "Replicas determined by hash ring:" << std::endl;
+  for (const auto& replica : replicas) {
+    std::cout << "  - " << replica.host << ":" << replica.port << std::endl;
+  }
 
   CreateFileRequest req;
   req.hydfs_filename = hydfs_filename;
@@ -177,10 +182,14 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
   char buffer[65536];
   size_t size = req.serialize(buffer, sizeof(buffer));
 
+  std::cout << "Serialized message size: " << size << " bytes" << std::endl;
+
   int sent_count = 0;
   for (const auto& replica : replicas) {
     // Skip self if we already stored locally
     if (replica == self_id_ && we_are_replica) {
+      std::cout << "  [SKIP] " << replica.host << ":" << replica.port
+                << " (already stored locally)" << std::endl;
       sent_count++;
       continue;
     }
@@ -191,13 +200,17 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
     dest_addr.sin_port = htons(std::atoi(replica.port));
     inet_pton(AF_INET, replica.host, &dest_addr.sin_addr);
 
+    std::cout << "  [SEND] Sending to " << replica.host << ":" << replica.port << "... ";
     if (sendFileMessage(FileMessageType::CREATE_REQUEST, buffer, size, dest_addr)) {
+      std::cout << "✅ SUCCESS" << std::endl;
       sent_count++;
     } else {
+      std::cout << "❌ FAILED" << std::endl;
       logger_.log("Failed to send create request to " + std::string(replica.host) + ":" +
                   std::string(replica.port));
     }
   }
+  std::cout << "================================\n" << std::endl;
 
   // Small delay to allow create requests to be processed
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -372,6 +385,13 @@ bool FileOperationsHandler::getFileFromReplica(const std::string& vm_address,
 
 void FileOperationsHandler::handleCreateRequest(const CreateFileRequest& req,
                                                 const struct sockaddr_in& sender) {
+  // DEBUG: Print to both stdout and log
+  std::cout << "\n=== RECEIVED CREATE_REQUEST ===" << std::endl;
+  std::cout << "Filename: " << req.hydfs_filename << std::endl;
+  std::cout << "Data size: " << req.data_size << " bytes" << std::endl;
+  std::cout << "Client ID: " << req.client_id << std::endl;
+  logger_.log("RECEIVED CREATE_REQUEST for: " + req.hydfs_filename);
+
   // Convert client_id from uint64_t to string
   std::string client_id_str = std::to_string(req.client_id);
 
@@ -379,10 +399,13 @@ void FileOperationsHandler::handleCreateRequest(const CreateFileRequest& req,
   bool success = file_store_.createFile(req.hydfs_filename, req.data, client_id_str);
 
   if (success) {
+    std::cout << "✅ File created successfully: " << req.hydfs_filename << std::endl;
     logger_.log("File created successfully from remote request: " + req.hydfs_filename);
   } else {
+    std::cout << "❌ File creation failed (may already exist): " << req.hydfs_filename << std::endl;
     logger_.log("File creation failed (may already exist): " + req.hydfs_filename);
   }
+  std::cout << "================================\n" << std::endl;
 
   // Send response back to the requesting client
   CreateFileResponse resp;
