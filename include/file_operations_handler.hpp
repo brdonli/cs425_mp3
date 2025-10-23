@@ -1,7 +1,10 @@
 #pragma once
 
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 
 #include "client_tracker.hpp"
 #include "consistent_hash_ring.hpp"
