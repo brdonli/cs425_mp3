@@ -651,8 +651,51 @@ void FileOperationsHandler::handleFileMessage(FileMessageType type, const char* 
         logger_.log("Received replication ACK for: " + ack_msg.hydfs_filename);
         break;
       }
+      case FileMessageType::CREATE_RESPONSE: {
+        CreateFileResponse resp = CreateFileResponse::deserialize(buffer, buffer_size);
+        std::cout << "[RESPONSE] CREATE_RESPONSE received - success: " << resp.success
+                  << " file_id: " << resp.file_id << std::endl;
+        if (!resp.success) {
+          std::cout << "[RESPONSE] Error: " << resp.error_message << std::endl;
+        }
+        break;
+      }
+      case FileMessageType::GET_RESPONSE: {
+        GetFileResponse resp = GetFileResponse::deserialize(buffer, buffer_size);
+        std::cout << "[RESPONSE] GET_RESPONSE received - success: " << resp.success << std::endl;
+        // Handle the response data if needed
+        break;
+      }
+      case FileMessageType::APPEND_RESPONSE: {
+        AppendFileResponse resp = AppendFileResponse::deserialize(buffer, buffer_size);
+        std::cout << "[RESPONSE] APPEND_RESPONSE received - success: " << resp.success
+                  << " block_id: " << resp.block_id << std::endl;
+        break;
+      }
+      case FileMessageType::MERGE_RESPONSE: {
+        MergeFileResponse resp = MergeFileResponse::deserialize(buffer, buffer_size);
+        std::cout << "[RESPONSE] MERGE_RESPONSE received - success: " << resp.success
+                  << " new_version: " << resp.new_version << std::endl;
+        break;
+      }
+      case FileMessageType::LS_RESPONSE: {
+        LsFileResponse resp = LsFileResponse::deserialize(buffer, buffer_size);
+        std::cout << "[RESPONSE] LS_RESPONSE received - " << resp.vm_addresses.size() << " replicas" << std::endl;
+        break;
+      }
+      case FileMessageType::LISTSTORE_RESPONSE: {
+        ListStoreResponse resp = ListStoreResponse::deserialize(buffer, buffer_size);
+        std::cout << "[RESPONSE] LISTSTORE_RESPONSE received - " << resp.filenames.size() << " files" << std::endl;
+        break;
+      }
+      case FileMessageType::COLLECT_BLOCKS_RESPONSE: {
+        CollectBlocksResponse resp = CollectBlocksResponse::deserialize(buffer, buffer_size);
+        std::cout << "[RESPONSE] COLLECT_BLOCKS_RESPONSE received - " << resp.blocks.size() << " blocks" << std::endl;
+        break;
+      }
       default:
-        logger_.log("Unknown file message type");
+        std::cout << "[WARNING] Unknown file message type: " << static_cast<int>(type) << std::endl;
+        logger_.log("Unknown file message type: " + std::to_string(static_cast<int>(type)));
         break;
     }
   } catch (const std::exception& e) {
