@@ -2,7 +2,9 @@
 # This creates a build/ directory and compiles everything
 
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -Wpedantic -O3 -DNDEBUG -Iinclude -Ilibs/catch2
+# Using -O0 -g for debugging to avoid optimization-related issues
+# Switch to -O3 -DNDEBUG for production
+CXXFLAGS = -std=c++17 -Wall -Wextra -Wpedantic -O0 -g -Iinclude -Ilibs/catch2
 LDFLAGS = -pthread
 
 # Directories
