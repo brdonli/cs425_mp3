@@ -302,16 +302,32 @@ GetFileResponse GetFileResponse::deserialize(const char* buffer, size_t buffer_s
     FileBlock block = FileBlock::deserialize(buffer + offset, buffer_size - offset);
     resp.blocks.push_back(block);
 
-    // Calculate actual block size
+    // Calculate actual block size by reading directly from buffer
     // Block format: block_id(8) + client_id_len(4) + client_id + sequence_num(4) +
     //              timestamp(8) + size(4) + data
-    offset += sizeof(uint64_t);  // block_id
-    offset += sizeof(uint32_t);  // client_id length
-    offset += block.client_id.length();  // client_id data
-    offset += sizeof(uint32_t);  // sequence_num
-    offset += sizeof(uint64_t);  // timestamp
-    offset += sizeof(uint32_t);  // size
-    offset += block.size;  // data
+    size_t block_offset = 0;
+    block_offset += sizeof(uint64_t);  // block_id
+
+    // Read client_id length from buffer
+    uint32_t client_id_len = 0;
+    if (offset + block_offset + sizeof(client_id_len) <= buffer_size) {
+      std::memcpy(&client_id_len, buffer + offset + block_offset, sizeof(client_id_len));
+    }
+    block_offset += sizeof(uint32_t);  // client_id length
+    block_offset += client_id_len;  // client_id data
+
+    block_offset += sizeof(uint32_t);  // sequence_num
+    block_offset += sizeof(uint64_t);  // timestamp
+
+    // Read actual data size from buffer
+    uint32_t data_size = 0;
+    if (offset + block_offset + sizeof(data_size) <= buffer_size) {
+      std::memcpy(&data_size, buffer + offset + block_offset, sizeof(data_size));
+    }
+    block_offset += sizeof(uint32_t);  // size field
+    block_offset += data_size;  // actual data
+
+    offset += block_offset;
   }
 
   return resp;
