@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <functional>
+#include <iostream>
 
 uint64_t FileBlock::generateBlockId(const std::string& client_id, uint64_t timestamp,
                                      uint32_t sequence_num) {
@@ -45,6 +46,11 @@ size_t FileBlock::serialize(char* buffer, size_t buffer_size) const {
   if (offset + size > buffer_size) return 0;
   std::memcpy(buffer + offset, data.data(), size);
   offset += size;
+
+  std::cout << "[FileBlock::serialize] block_id=" << block_id
+            << ", client_id.len=" << client_id.length()
+            << ", data.size=" << size
+            << ", total=" << offset << " bytes" << std::endl;
 
   return offset;
 }
