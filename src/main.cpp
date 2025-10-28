@@ -38,7 +38,7 @@ int main(int argc, char* argv[]) {
       std::cout << "  append <localfile> <hydfsfile>   - Append local file to HyDFS file\n";
       std::cout << "  merge <hydfsfile>                - Merge all replicas of a file\n";
       std::cout << "  ls <hydfsfile>                   - List all VMs storing the file\n";
-      std::cout << "  store                            - List all files stored on this node\n";
+      std::cout << "  store / liststore                - List all files stored on this VM (with ring ID)\n";
       std::cout << "  getfromreplica <vm:port> <hydfsfile> <localfile>\n";
       std::cout << "                                   - Get file from specific replica\n";
       std::cout << "\nMembership Operations:\n";
@@ -118,7 +118,8 @@ int main(int argc, char* argv[]) {
       std::string hydfs_file;
       std::cin >> hydfs_file;
       node.getFileHandler()->listFileLocations(hydfs_file);
-    } else if (input == "store") {
+    } else if (input == "store" || input == "liststore") {
+      // liststore: List files stored on this VM (per MP3 spec)
       node.getFileHandler()->listLocalFiles();
     } else if (input == "getfromreplica") {
       std::string vm_address, hydfs_file, local_file;

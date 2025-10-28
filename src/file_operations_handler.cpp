@@ -434,11 +434,22 @@ void FileOperationsHandler::listFileLocations(const std::string& hydfs_filename)
 void FileOperationsHandler::listLocalFiles() {
   std::vector<std::string> files = file_store_.listFiles();
 
-  std::cout << "Files stored locally (" << files.size() << "):\n";
-  for (const auto& filename : files) {
-    FileMetadata meta = file_store_.getFileMetadata(filename);
-    std::cout << "  - " << filename << " (file ID: " << meta.file_id << ")\n";
+  // Print VM's ring ID first (as per MP3 spec)
+  uint64_t my_ring_id = hash_ring_.getNodePosition(self_id_);
+  std::cout << "\n=== LISTSTORE (VM Ring ID: " << my_ring_id << ") ===" << std::endl;
+  std::cout << "Node: " << self_id_.host << ":" << self_id_.port << std::endl;
+  std::cout << "Files stored in HyDFS at this VM: " << files.size() << std::endl;
+  std::cout << "========================================" << std::endl;
+
+  if (files.empty()) {
+    std::cout << "(No files stored locally)" << std::endl;
+  } else {
+    for (const auto& filename : files) {
+      FileMetadata meta = file_store_.getFileMetadata(filename);
+      std::cout << "  - " << filename << " (file ID: " << meta.file_id << ")" << std::endl;
+    }
   }
+  std::cout << "========================================\n" << std::endl;
 }
 
 bool FileOperationsHandler::getFileFromReplica(const std::string& vm_address,
