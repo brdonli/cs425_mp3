@@ -28,9 +28,22 @@ Node::Node(const std::string_view& host, const std::string_view& port, NodeId& i
                       std::strcmp(introducer.port, self.port) == 0);
 
   // MP3: Initialize file system components
-  std::string storage_dir = "./hydfs_storage_" + std::string(host) + "_" + std::string(port);
+  std::cout << "[DEBUG] Creating storage_dir string..." << std::endl;
+  std::string storage_dir;
+  storage_dir.reserve(256);  // Pre-allocate to avoid reallocation
+  storage_dir = "./hydfs_storage_";
+  storage_dir += host;
+  storage_dir += "_";
+  storage_dir += port;
+  std::cout << "[DEBUG] Storage dir: " << storage_dir << std::endl;
+
+  std::cout << "[DEBUG] Creating FileStore..." << std::endl;
   file_store_ = std::make_unique<FileStore>(storage_dir);
+  std::cout << "[DEBUG] FileStore created successfully" << std::endl;
+
+  std::cout << "[DEBUG] Creating FileOperationsHandler..." << std::endl;
   file_handler_ = std::make_unique<FileOperationsHandler>(*file_store_, ring, self, logger, socket);
+  std::cout << "[DEBUG] FileOperationsHandler created successfully" << std::endl;
 }
 
 void Node::handleIncoming() {
