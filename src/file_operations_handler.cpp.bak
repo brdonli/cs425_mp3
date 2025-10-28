@@ -98,7 +98,7 @@ bool FileOperationsHandler::replicateBlock(const std::string& hydfs_filename,
   msg.hydfs_filename = hydfs_filename;
   msg.block = block;
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = msg.serialize(buffer, sizeof(buffer));
 
   bool all_success = true;
@@ -192,7 +192,7 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
   req.data = data;
   req.data_size = data.size();
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = req.serialize(buffer, sizeof(buffer));
 
   std::cout << "Serialized message size: " << size << " bytes" << std::endl;
@@ -299,7 +299,7 @@ bool FileOperationsHandler::getFile(const std::string& hydfs_filename,
     req.client_id = hash_ring_.getNodePosition(self_id_);
     req.last_known_sequence = 0;
 
-    char buffer[8192];
+    char buffer[65536];
     size_t size = req.serialize(buffer, sizeof(buffer));
 
     struct sockaddr_in dest_addr;
@@ -370,7 +370,7 @@ bool FileOperationsHandler::appendFile(const std::string& local_filename,
   req.data = data;
   req.data_size = data.size();
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = req.serialize(buffer, sizeof(buffer));
 
   // Send to coordinator
@@ -396,7 +396,7 @@ bool FileOperationsHandler::mergeFile(const std::string& hydfs_filename) {
   req.hydfs_filename = hydfs_filename;
   req.is_coordinator = isCoordinator(hydfs_filename);
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = req.serialize(buffer, sizeof(buffer));
 
   // Send to coordinator
@@ -549,7 +549,7 @@ bool FileOperationsHandler::getFileFromReplica(const std::string& vm_address,
   req.client_id = hash_ring_.getNodePosition(self_id_);
   req.last_known_sequence = 0;
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = req.serialize(buffer, sizeof(buffer));
 
   struct sockaddr_in dest_addr;
@@ -595,7 +595,7 @@ void FileOperationsHandler::handleCreateRequest(const CreateFileRequest& req,
     resp.error_message = "File already exists";
   }
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = resp.serialize(buffer, sizeof(buffer));
   sendFileMessage(FileMessageType::CREATE_RESPONSE, buffer, size, sender);
 }
@@ -692,7 +692,7 @@ void FileOperationsHandler::handleAppendRequest(const AppendFileRequest& req,
     resp.error_message = "File not found or append failed";
   }
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = resp.serialize(buffer, sizeof(buffer));
   sendFileMessage(FileMessageType::APPEND_RESPONSE, buffer, size, sender);
 
@@ -712,7 +712,7 @@ void FileOperationsHandler::handleMergeRequest(const MergeFileRequest& req,
   resp.success = true;
   resp.new_version = file_store_.getFileMetadata(req.hydfs_filename).version;
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = resp.serialize(buffer, sizeof(buffer));
   sendFileMessage(FileMessageType::MERGE_RESPONSE, buffer, size, sender);
 }
@@ -731,7 +731,7 @@ void FileOperationsHandler::handleLsRequest(const LsFileRequest& req,
     resp.ring_ids.push_back(hash_ring_.getNodePosition(replica));
   }
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = resp.serialize(buffer, sizeof(buffer));
   sendFileMessage(FileMessageType::LS_RESPONSE, buffer, size, sender);
 }
@@ -746,7 +746,7 @@ void FileOperationsHandler::handleListStoreRequest(const ListStoreRequest& /* re
     resp.file_ids.push_back(file_store_.getFileMetadata(filename).file_id);
   }
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = resp.serialize(buffer, sizeof(buffer));
   sendFileMessage(FileMessageType::LISTSTORE_RESPONSE, buffer, size, sender);
 }
@@ -830,7 +830,7 @@ void FileOperationsHandler::handleReplicateBlock(const ReplicateBlockMessage& ms
   ack_msg.hydfs_filename = msg.hydfs_filename;
   ack_msg.block = msg.block;  // Include original block for identification
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = ack_msg.serialize(buffer, sizeof(buffer));
   sendFileMessage(FileMessageType::REPLICATE_ACK, buffer, size, sender);
 }
@@ -845,7 +845,7 @@ void FileOperationsHandler::handleCollectBlocksRequest(const CollectBlocksReques
     resp.version = file_store_.getFileMetadata(req.hydfs_filename).version;
   }
 
-  char buffer[8192];
+  char buffer[65536];
   size_t size = resp.serialize(buffer, sizeof(buffer));
   sendFileMessage(FileMessageType::COLLECT_BLOCKS_RESPONSE, buffer, size, sender);
 }
