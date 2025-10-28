@@ -611,6 +611,88 @@ ListStoreResponse ListStoreResponse::deserialize(const char* buffer, size_t buff
   return resp;
 }
 
+// ===== FileExistsRequest =====
+size_t FileExistsRequest::serialize(char* buffer, size_t buffer_size) const {
+  size_t offset = 0;
+  offset = serializeString(buffer, buffer_size, offset, hydfs_filename);
+  offset = serializeString(buffer, buffer_size, offset, requester_id);
+  return offset;
+}
+
+FileExistsRequest FileExistsRequest::deserialize(const char* buffer, size_t buffer_size) {
+  FileExistsRequest req;
+  size_t offset = 0;
+  req.hydfs_filename = deserializeString(buffer, buffer_size, offset);
+  req.requester_id = deserializeString(buffer, buffer_size, offset);
+  return req;
+}
+
+// ===== FileExistsResponse =====
+size_t FileExistsResponse::serialize(char* buffer, size_t buffer_size) const {
+  size_t offset = 0;
+
+  offset = serializeString(buffer, buffer_size, offset, hydfs_filename);
+
+  uint8_t exists_byte = exists ? 1 : 0;
+  if (offset + sizeof(exists_byte) > buffer_size) {
+    throw std::runtime_error("Buffer too small");
+  }
+  std::memcpy(buffer + offset, &exists_byte, sizeof(exists_byte));
+  offset += sizeof(exists_byte);
+
+  uint64_t network_file_id = htobe64(file_id);
+  if (offset + sizeof(network_file_id) > buffer_size) {
+    throw std::runtime_error("Buffer too small");
+  }
+  std::memcpy(buffer + offset, &network_file_id, sizeof(network_file_id));
+  offset += sizeof(network_file_id);
+
+  uint64_t network_file_size = htobe64(file_size);
+  if (offset + sizeof(network_file_size) > buffer_size) {
+    throw std::runtime_error("Buffer too small");
+  }
+  std::memcpy(buffer + offset, &network_file_size, sizeof(network_file_size));
+  offset += sizeof(network_file_size);
+
+  uint32_t network_version = htonl(version);
+  if (offset + sizeof(network_version) > buffer_size) {
+    throw std::runtime_error("Buffer too small");
+  }
+  std::memcpy(buffer + offset, &network_version, sizeof(network_version));
+  offset += sizeof(network_version);
+
+  return offset;
+}
+
+FileExistsResponse FileExistsResponse::deserialize(const char* buffer, size_t buffer_size) {
+  FileExistsResponse resp;
+  size_t offset = 0;
+
+  resp.hydfs_filename = deserializeString(buffer, buffer_size, offset);
+
+  uint8_t exists_byte;
+  std::memcpy(&exists_byte, buffer + offset, sizeof(exists_byte));
+  resp.exists = (exists_byte != 0);
+  offset += sizeof(exists_byte);
+
+  uint64_t network_file_id;
+  std::memcpy(&network_file_id, buffer + offset, sizeof(network_file_id));
+  resp.file_id = be64toh(network_file_id);
+  offset += sizeof(network_file_id);
+
+  uint64_t network_file_size;
+  std::memcpy(&network_file_size, buffer + offset, sizeof(network_file_size));
+  resp.file_size = be64toh(network_file_size);
+  offset += sizeof(network_file_size);
+
+  uint32_t network_version;
+  std::memcpy(&network_version, buffer + offset, sizeof(network_version));
+  resp.version = ntohl(network_version);
+  offset += sizeof(network_version);
+
+  return resp;
+}
+
 // ===== ReplicateBlockMessage =====
 size_t ReplicateBlockMessage::serialize(char* buffer, size_t buffer_size) const {
   size_t offset = 0;

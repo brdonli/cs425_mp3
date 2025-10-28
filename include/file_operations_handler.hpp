@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -45,6 +46,8 @@ class FileOperationsHandler {
   void handleMergeRequest(const MergeFileRequest& req, const struct sockaddr_in& sender);
   void handleLsRequest(const LsFileRequest& req, const struct sockaddr_in& sender);
   void handleListStoreRequest(const ListStoreRequest& req, const struct sockaddr_in& sender);
+  void handleFileExistsRequest(const FileExistsRequest& req, const struct sockaddr_in& sender);
+  void handleFileExistsResponse(const FileExistsResponse& resp);
   void handleReplicateBlock(const ReplicateBlockMessage& msg, const struct sockaddr_in& sender);
   void handleCollectBlocksRequest(const CollectBlocksRequest& req,
                                   const struct sockaddr_in& sender);
@@ -96,4 +99,15 @@ class FileOperationsHandler {
 
   // Results of get requests (hydfs_filename -> success flag)
   std::unordered_map<std::string, bool> get_results_;
+
+  // Tracking pending ls requests
+  struct LsRequestState {
+    std::string hydfs_filename;
+    std::vector<NodeId> expected_replicas;
+    std::unordered_map<std::string, FileExistsResponse> responses;  // vm_address -> response
+    std::chrono::steady_clock::time_point start_time;
+  };
+  std::unordered_map<std::string, LsRequestState> pending_ls_;  // hydfs_filename -> state
+  std::mutex pending_ls_mtx_;
+  std::condition_variable ls_cv_;
 };

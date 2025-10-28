@@ -420,30 +420,93 @@ bool FileOperationsHandler::mergeFile(const std::string& hydfs_filename) {
 void FileOperationsHandler::listFileLocations(const std::string& hydfs_filename) {
   std::vector<NodeId> replicas = hash_ring_.getFileReplicas(hydfs_filename, 3);
 
-  // Check if file exists locally or anywhere
-  bool exists_locally = file_store_.hasFile(hydfs_filename);
+  std::cout << "\n=== LS: Checking file existence across replicas ===" << std::endl;
+  std::cout << "File: " << hydfs_filename << std::endl;
+  std::cout << "File ID: " << FileMetadata::generateFileId(hydfs_filename) << std::endl;
 
-  std::cout << "\n=== LS FILE LOCATIONS ===" << std::endl;
-  std::cout << "File: " << hydfs_filename << "\n";
-  std::cout << "File ID: " << FileMetadata::generateFileId(hydfs_filename) << "\n";
-  std::cout << "File exists: " << (exists_locally ? "YES (on this VM)" : "UNKNOWN (not on this VM)") << "\n";
-  std::cout << "\nTheoretical replica locations (based on consistent hashing):\n";
-  std::cout << "These " << replicas.size() << " VMs should store this file:\n";
+  // Register pending ls request
+  {
+    std::lock_guard<std::mutex> lock(pending_ls_mtx_);
+    LsRequestState state;
+    state.hydfs_filename = hydfs_filename;
+    state.expected_replicas = replicas;
+    state.start_time = std::chrono::steady_clock::now();
+    pending_ls_[hydfs_filename] = state;
+  }
 
+  // Send FILE_EXISTS_REQUEST to all replicas
+  std::string requester_id = std::string(self_id_.host) + ":" + std::string(self_id_.port);
   for (const auto& replica : replicas) {
-    uint64_t ring_id = hash_ring_.getNodePosition(replica);
-    bool is_self = (replica.host == self_id_.host && replica.port == self_id_.port);
-    std::string status = "";
+    FileExistsRequest req;
+    req.hydfs_filename = hydfs_filename;
+    req.requester_id = requester_id;
 
-    if (is_self) {
-      status = exists_locally ? " [✓ CONFIRMED - file exists here]" : " [✗ MISSING - should be here but not found]";
+    char buffer[8192];
+    size_t size = req.serialize(buffer, sizeof(buffer));
+
+    struct sockaddr_in dest_addr;
+    socket_.buildServerAddr(dest_addr, replica.host, replica.port);
+    sendFileMessage(FileMessageType::FILE_EXISTS_REQUEST, buffer, size, dest_addr);
+  }
+
+  // Wait for responses with 3 second timeout
+  {
+    std::unique_lock<std::mutex> lock(pending_ls_mtx_);
+    bool got_all_responses = ls_cv_.wait_for(lock, std::chrono::seconds(3), [&]() {
+      auto it = pending_ls_.find(hydfs_filename);
+      if (it == pending_ls_.end()) return true;
+      return it->second.responses.size() >= replicas.size();
+    });
+
+    auto it = pending_ls_.find(hydfs_filename);
+    if (it == pending_ls_.end()) {
+      std::cout << "❌ LS request cancelled or failed" << std::endl;
+      return;
     }
 
-    std::cout << "  - " << replica.host << ":" << replica.port << " (ring ID: " << ring_id
-              << ")" << status << "\n";
+    // Display results
+    std::cout << "\n=== LS RESULTS ===" << std::endl;
+    std::cout << "Replicas that should store this file (based on hash ring): " << replicas.size() << std::endl;
+    std::cout << "Responses received: " << it->second.responses.size() << std::endl;
+
+    if (!got_all_responses) {
+      std::cout << "\n⚠ Warning: Timeout waiting for all responses\n" << std::endl;
+    }
+
+    bool file_exists_somewhere = false;
+    std::cout << "\nReplica Status:\n";
+    for (const auto& replica : replicas) {
+      uint64_t ring_id = hash_ring_.getNodePosition(replica);
+      std::string vm_address = std::string(replica.host) + ":" + std::string(replica.port);
+
+      auto resp_it = it->second.responses.find(vm_address);
+      if (resp_it != it->second.responses.end()) {
+        const auto& resp = resp_it->second;
+        if (resp.exists) {
+          file_exists_somewhere = true;
+          std::cout << "  ✓ " << vm_address << " (ring ID: " << ring_id << ")"
+                    << " - HAS FILE (size: " << resp.file_size << " bytes, version: " << resp.version << ")" << std::endl;
+        } else {
+          std::cout << "  ✗ " << vm_address << " (ring ID: " << ring_id << ")"
+                    << " - NO FILE" << std::endl;
+        }
+      } else {
+        std::cout << "  ? " << vm_address << " (ring ID: " << ring_id << ")"
+                  << " - NO RESPONSE (timeout or unreachable)" << std::endl;
+      }
+    }
+
+    std::cout << "\n=== SUMMARY ===" << std::endl;
+    if (file_exists_somewhere) {
+      std::cout << "✓ File EXISTS in HyDFS" << std::endl;
+    } else {
+      std::cout << "✗ File DOES NOT EXIST in HyDFS" << std::endl;
+    }
+    std::cout << "================\n" << std::endl;
+
+    // Clean up
+    pending_ls_.erase(it);
   }
-  std::cout << "\nNote: Use 'getfromreplica' to verify file exists at other VMs\n";
-  std::cout << "========================\n" << std::endl;
 }
 
 void FileOperationsHandler::listLocalFiles() {
@@ -688,6 +751,53 @@ void FileOperationsHandler::handleListStoreRequest(const ListStoreRequest& /* re
   sendFileMessage(FileMessageType::LISTSTORE_RESPONSE, buffer, size, sender);
 }
 
+void FileOperationsHandler::handleFileExistsRequest(const FileExistsRequest& req,
+                                                     const struct sockaddr_in& sender) {
+  FileExistsResponse resp;
+  resp.hydfs_filename = req.hydfs_filename;
+  resp.exists = file_store_.hasFile(req.hydfs_filename);
+
+  if (resp.exists) {
+    FileMetadata meta = file_store_.getFileMetadata(req.hydfs_filename);
+    resp.file_id = meta.file_id;
+    resp.file_size = meta.total_size;
+    resp.version = meta.version;
+  } else {
+    resp.file_id = 0;
+    resp.file_size = 0;
+    resp.version = 0;
+  }
+
+  char buffer[8192];
+  size_t size = resp.serialize(buffer, sizeof(buffer));
+  sendFileMessage(FileMessageType::FILE_EXISTS_RESPONSE, buffer, size, sender);
+}
+
+void FileOperationsHandler::handleFileExistsResponse(const FileExistsResponse& resp) {
+  std::lock_guard<std::mutex> lock(pending_ls_mtx_);
+
+  auto it = pending_ls_.find(resp.hydfs_filename);
+  if (it == pending_ls_.end()) {
+    // No pending request for this file
+    return;
+  }
+
+  // Find which replica this response is from by checking against expected replicas
+  for (const auto& replica : it->second.expected_replicas) {
+    std::string vm_address = std::string(replica.host) + ":" + std::string(replica.port);
+    // Store the response (we don't know exact sender, so we match by finding missing responses)
+    if (it->second.responses.find(vm_address) == it->second.responses.end()) {
+      it->second.responses[vm_address] = resp;
+      break;
+    }
+  }
+
+  // Notify if we got all responses
+  if (it->second.responses.size() >= it->second.expected_replicas.size()) {
+    ls_cv_.notify_all();
+  }
+}
+
 void FileOperationsHandler::handleReplicateBlock(const ReplicateBlockMessage& msg,
                                                   const struct sockaddr_in& sender) {
   std::cout << "\n=== RECEIVED REPLICATE_BLOCK ===" << std::endl;
@@ -855,6 +965,16 @@ void FileOperationsHandler::handleFileMessage(FileMessageType type, const char* 
       case FileMessageType::LISTSTORE_REQUEST: {
         ListStoreRequest req = ListStoreRequest::deserialize(buffer, buffer_size);
         handleListStoreRequest(req, sender);
+        break;
+      }
+      case FileMessageType::FILE_EXISTS_REQUEST: {
+        FileExistsRequest req = FileExistsRequest::deserialize(buffer, buffer_size);
+        handleFileExistsRequest(req, sender);
+        break;
+      }
+      case FileMessageType::FILE_EXISTS_RESPONSE: {
+        FileExistsResponse resp = FileExistsResponse::deserialize(buffer, buffer_size);
+        handleFileExistsResponse(resp);
         break;
       }
       case FileMessageType::REPLICATE_BLOCK: {

@@ -54,6 +54,8 @@ enum class FileMessageType : uint8_t {
   LS_RESPONSE,              // Response with file locations
   LISTSTORE_REQUEST,        // Request to list files on a node
   LISTSTORE_RESPONSE,       // Response with stored files
+  FILE_EXISTS_REQUEST,      // Check if a file exists at a replica
+  FILE_EXISTS_RESPONSE,     // Response with existence status
 
   // Merge coordination
   COLLECT_BLOCKS_REQUEST,   // Coordinator requests blocks from replica
@@ -216,6 +218,31 @@ struct ListStoreResponse {
 
   size_t serialize(char* buffer, size_t buffer_size) const;
   static ListStoreResponse deserialize(const char* buffer, size_t buffer_size);
+};
+
+/**
+ * Request to check if a file exists at a replica
+ */
+struct FileExistsRequest {
+  std::string hydfs_filename;
+  std::string requester_id;  // ID of node making the request
+
+  size_t serialize(char* buffer, size_t buffer_size) const;
+  static FileExistsRequest deserialize(const char* buffer, size_t buffer_size);
+};
+
+/**
+ * Response indicating if a file exists
+ */
+struct FileExistsResponse {
+  std::string hydfs_filename;
+  bool exists;
+  uint64_t file_id;        // Only valid if exists == true
+  size_t file_size;        // Only valid if exists == true
+  uint32_t version;        // Only valid if exists == true
+
+  size_t serialize(char* buffer, size_t buffer_size) const;
+  static FileExistsResponse deserialize(const char* buffer, size_t buffer_size);
 };
 
 /**
