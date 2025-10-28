@@ -253,17 +253,40 @@ GetFileResponse GetFileResponse::deserialize(const char* buffer, size_t buffer_s
   GetFileResponse resp;
   size_t offset = 0;
 
+  if (buffer_size < 1) {
+    return resp;  // Buffer too small
+  }
+
   resp.success = buffer[offset] != 0;
   offset += 1;
 
   resp.error_message = deserializeString(buffer, buffer_size, offset);
 
-  // Deserialize metadata
+  // For failed responses, metadata and blocks may be empty
+  if (!resp.success) {
+    return resp;
+  }
+
+  // Deserialize metadata - need to calculate actual size consumed
   resp.metadata = FileMetadata::deserialize(buffer + offset, buffer_size - offset);
-  // Calculate offset manually based on metadata structure
-  offset += sizeof(uint32_t) + resp.metadata.hydfs_filename.length() +
-            sizeof(uint64_t) * 3 + sizeof(uint32_t) + sizeof(uint64_t) * 2 +
-            sizeof(uint32_t) + resp.metadata.block_ids.size() * sizeof(uint64_t);
+
+  // Calculate actual metadata size by re-serializing (safest approach)
+  // Metadata format: filename_len(4) + filename + file_id(8) + total_size(8) +
+  //                  version(4) + created_ts(8) + modified_ts(8) + block_count(4) + block_ids
+  offset += sizeof(uint32_t);  // filename length
+  offset += resp.metadata.hydfs_filename.length();  // filename data
+  offset += sizeof(uint64_t);  // file_id
+  offset += sizeof(uint64_t);  // total_size
+  offset += sizeof(uint32_t);  // version
+  offset += sizeof(uint64_t);  // created_timestamp
+  offset += sizeof(uint64_t);  // last_modified_timestamp
+  offset += sizeof(uint32_t);  // block_count
+  offset += resp.metadata.block_ids.size() * sizeof(uint64_t);  // block_ids array
+
+  // Check if we have enough buffer left for block count
+  if (offset + sizeof(uint32_t) > buffer_size) {
+    return resp;  // Not enough data
+  }
 
   // Deserialize blocks
   uint32_t network_count;
@@ -272,11 +295,23 @@ GetFileResponse GetFileResponse::deserialize(const char* buffer, size_t buffer_s
   offset += sizeof(network_count);
 
   for (uint32_t i = 0; i < block_count; ++i) {
+    if (offset >= buffer_size) {
+      break;  // Prevent buffer overrun
+    }
+
     FileBlock block = FileBlock::deserialize(buffer + offset, buffer_size - offset);
     resp.blocks.push_back(block);
-    // Calculate block offset
-    offset += sizeof(uint64_t) * 3 + sizeof(uint32_t) * 2 + sizeof(uint32_t) +
-              block.client_id.length() + block.size;
+
+    // Calculate actual block size
+    // Block format: block_id(8) + client_id_len(4) + client_id + sequence_num(4) +
+    //              timestamp(8) + size(4) + data
+    offset += sizeof(uint64_t);  // block_id
+    offset += sizeof(uint32_t);  // client_id length
+    offset += block.client_id.length();  // client_id data
+    offset += sizeof(uint32_t);  // sequence_num
+    offset += sizeof(uint64_t);  // timestamp
+    offset += sizeof(uint32_t);  // size
+    offset += block.size;  // data
   }
 
   return resp;
