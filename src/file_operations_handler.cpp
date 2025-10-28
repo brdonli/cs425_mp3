@@ -531,10 +531,10 @@ void FileOperationsHandler::handleGetRequest(const GetFileRequest& req,
     std::cout << "Sending " << resp.blocks.size() << " blocks (" << resp.metadata.total_size << " bytes)" << std::endl;
 
     // Check if file is too large for single UDP packet
-    if (resp.metadata.total_size > 50000) {  // Conservative limit for UDP
+    if (resp.metadata.total_size > 7000) {  // Conservative limit for 8KB buffer
       std::cout << "⚠️  WARNING: File size (" << resp.metadata.total_size
-                << " bytes) exceeds safe UDP limit" << std::endl;
-      std::cout << "This may cause buffer overflow. Consider implementing chunked transfer." << std::endl;
+                << " bytes) exceeds safe UDP limit (8KB buffer)" << std::endl;
+      std::cout << "This may cause buffer overflow or packet loss." << std::endl;
     }
   } else {
     std::cout << "❌ File not found in local store" << std::endl;
@@ -554,7 +554,7 @@ void FileOperationsHandler::handleGetRequest(const GetFileRequest& req,
       // Send error response instead
       GetFileResponse error_resp;
       error_resp.success = false;
-      error_resp.error_message = "File too large for UDP transfer (max 64KB)";
+      error_resp.error_message = "File too large for UDP transfer (max ~7KB)";
       std::vector<char> small_buffer(4096);
       size_t error_size = error_resp.serialize(small_buffer.data(), small_buffer.size());
       sendFileMessage(FileMessageType::GET_RESPONSE, small_buffer.data(), error_size, sender);

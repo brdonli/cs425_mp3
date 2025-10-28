@@ -7,10 +7,11 @@
 
 class UDPSocketConnection {
  public:
-  // Maximum UDP datagram size is 65535 bytes (2^16 - 1)
-  // Using 64KB as a safe limit for large file transfers
-  // UDP will fragment packets larger than MTU (~1500 bytes) automatically
-  static constexpr size_t BUFFER_LEN = 65536;  // 64KB
+  // Buffer size for UDP packets
+  // Note: While max UDP datagram is 65KB, large stack allocations cause issues
+  // Using 8KB as a practical limit (safe for stack allocation)
+  // For larger transfers, implement chunking or use TCP
+  static constexpr size_t BUFFER_LEN = 8192;  // 8KB
 
   UDPSocketConnection(const std::string_view &hostname, const std::string_view &port) :
       fd(-1), hostname(hostname), port(port) {}
