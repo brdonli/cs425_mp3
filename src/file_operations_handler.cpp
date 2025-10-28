@@ -72,20 +72,21 @@ bool FileOperationsHandler::isCoordinator(const std::string& hydfs_filename) con
 bool FileOperationsHandler::sendFileMessage(FileMessageType type, const char* buffer,
                                             size_t buffer_size,
                                             const struct sockaddr_in& dest) {
-  // Create a message buffer with type prefix
-  std::array<char, UDPSocketConnection::BUFFER_LEN> msg_buffer;
-  msg_buffer[0] = static_cast<uint8_t>(type);
-  std::memcpy(msg_buffer.data() + 1, buffer, std::min(buffer_size, msg_buffer.size() - 1));
+  // Create a message buffer with type prefix using string for dynamic allocation
+  std::string msg_buffer;
+  msg_buffer.reserve(buffer_size + 1);
+  msg_buffer.push_back(static_cast<char>(type));
+  msg_buffer.append(buffer, std::min(buffer_size, static_cast<size_t>(UDPSocketConnection::BUFFER_LEN - 1)));
 
   char dest_ip[INET_ADDRSTRLEN];
   inet_ntop(AF_INET, &(dest.sin_addr), dest_ip, INET_ADDRSTRLEN);
   std::cout << "[SEND_FILE_MSG] Type: " << static_cast<int>(type)
             << " to " << dest_ip << ":" << ntohs(dest.sin_port)
-            << " size: " << (buffer_size + 1) << " bytes" << std::endl;
+            << " size: " << msg_buffer.size() << " bytes" << std::endl;
 
-  ssize_t sent = socket_.write_to_socket(msg_buffer, buffer_size + 1, dest);
+  ssize_t sent = socket_.write_to_socket(msg_buffer, dest);
 
-  std::cout << "[SEND_FILE_MSG] Sent " << sent << " bytes (expected " << (buffer_size + 1) << ")" << std::endl;
+  std::cout << "[SEND_FILE_MSG] Sent " << sent << " bytes (expected " << msg_buffer.size() << ")" << std::endl;
 
   return sent > 0;
 }
