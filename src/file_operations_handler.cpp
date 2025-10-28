@@ -528,15 +528,49 @@ void FileOperationsHandler::handleGetRequest(const GetFileRequest& req,
     resp.metadata = file_store_.getFileMetadata(req.hydfs_filename);
     resp.blocks = file_store_.getFileBlocks(req.hydfs_filename);
     std::cout << "Sending " << resp.blocks.size() << " blocks (" << resp.metadata.total_size << " bytes)" << std::endl;
+
+    // Check if file is too large for single UDP packet
+    if (resp.metadata.total_size > 50000) {  // Conservative limit for UDP
+      std::cout << "⚠️  WARNING: File size (" << resp.metadata.total_size
+                << " bytes) exceeds safe UDP limit" << std::endl;
+      std::cout << "This may cause buffer overflow. Consider implementing chunked transfer." << std::endl;
+    }
   } else {
     std::cout << "❌ File not found in local store" << std::endl;
     resp.success = false;
     resp.error_message = "File not found";
   }
 
-  char buffer[65536];
-  size_t size = resp.serialize(buffer, sizeof(buffer));
-  sendFileMessage(FileMessageType::GET_RESPONSE, buffer, size, sender);
+  try {
+    // Allocate buffer matching UDP limit (64KB)
+    std::vector<char> buffer(UDPSocketConnection::BUFFER_LEN);
+    size_t size = resp.serialize(buffer.data(), buffer.size());
+
+    if (size > UDPSocketConnection::BUFFER_LEN) {
+      std::cout << "❌ ERROR: Serialized size (" << size << " bytes) exceeds UDP packet limit ("
+                << UDPSocketConnection::BUFFER_LEN << " bytes)" << std::endl;
+
+      // Send error response instead
+      GetFileResponse error_resp;
+      error_resp.success = false;
+      error_resp.error_message = "File too large for UDP transfer (max 64KB)";
+      std::vector<char> small_buffer(4096);
+      size_t error_size = error_resp.serialize(small_buffer.data(), small_buffer.size());
+      sendFileMessage(FileMessageType::GET_RESPONSE, small_buffer.data(), error_size, sender);
+    } else {
+      sendFileMessage(FileMessageType::GET_RESPONSE, buffer.data(), size, sender);
+    }
+  } catch (const std::exception& e) {
+    std::cout << "❌ ERROR during serialization: " << e.what() << std::endl;
+
+    // Send error response
+    GetFileResponse error_resp;
+    error_resp.success = false;
+    error_resp.error_message = std::string("Serialization error: ") + e.what();
+    std::vector<char> error_buffer(4096);
+    size_t error_size = error_resp.serialize(error_buffer.data(), error_buffer.size());
+    sendFileMessage(FileMessageType::GET_RESPONSE, error_buffer.data(), error_size, sender);
+  }
 
   std::cout << "✅ REPLICA: GET_REQUEST processing completed" << std::endl;
   logger_.log("REPLICA: Completed GET_REQUEST for " + req.hydfs_filename +
