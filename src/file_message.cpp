@@ -2,6 +2,7 @@
 
 #include <arpa/inet.h>
 #include <cstring>
+#include <iostream>
 #include <stdexcept>
 
 // macOS compatibility for byte order functions
@@ -299,8 +300,14 @@ GetFileResponse GetFileResponse::deserialize(const char* buffer, size_t buffer_s
       break;  // Prevent buffer overrun
     }
 
+    std::cout << "[DESER] Block " << i << " starts at offset " << offset << std::endl;
+
     FileBlock block = FileBlock::deserialize(buffer + offset, buffer_size - offset);
     resp.blocks.push_back(block);
+
+    std::cout << "[DESER] Deserialized block: size=" << block.size
+              << ", data.size()=" << block.data.size()
+              << ", client_id.length()=" << block.client_id.length() << std::endl;
 
     // Calculate actual block size by reading directly from buffer
     // Block format: block_id(8) + client_id_len(4) + client_id + sequence_num(4) +
@@ -313,6 +320,7 @@ GetFileResponse GetFileResponse::deserialize(const char* buffer, size_t buffer_s
     if (offset + block_offset + sizeof(client_id_len) <= buffer_size) {
       std::memcpy(&client_id_len, buffer + offset + block_offset, sizeof(client_id_len));
     }
+    std::cout << "[DESER] Read client_id_len from buffer: " << client_id_len << std::endl;
     block_offset += sizeof(uint32_t);  // client_id length
     block_offset += client_id_len;  // client_id data
 
@@ -324,9 +332,11 @@ GetFileResponse GetFileResponse::deserialize(const char* buffer, size_t buffer_s
     if (offset + block_offset + sizeof(data_size) <= buffer_size) {
       std::memcpy(&data_size, buffer + offset + block_offset, sizeof(data_size));
     }
+    std::cout << "[DESER] Read data_size from buffer: " << data_size << std::endl;
     block_offset += sizeof(uint32_t);  // size field
     block_offset += data_size;  // actual data
 
+    std::cout << "[DESER] Block " << i << " consumed " << block_offset << " bytes, next offset: " << (offset + block_offset) << std::endl;
     offset += block_offset;
   }
 
