@@ -239,14 +239,20 @@ size_t GetFileResponse::serialize(char* buffer, size_t buffer_size) const {
   offset += sizeof(network_count);
 
   // Serialize each block
-  for (const auto& block : blocks) {
+  std::cout << "[SER] Serializing " << blocks.size() << " blocks, current offset: " << offset << std::endl;
+  for (size_t i = 0; i < blocks.size(); i++) {
+    const auto& block = blocks[i];
+    std::cout << "[SER] Block " << i << ": data.size=" << block.data.size()
+              << ", buffer space left=" << (buffer_size - offset) << std::endl;
     size_t block_size = block.serialize(buffer + offset, buffer_size - offset);
+    std::cout << "[SER] Block " << i << " serialized to " << block_size << " bytes" << std::endl;
     if (block_size == 0) {
       throw std::runtime_error("Failed to serialize block");
     }
     offset += block_size;
   }
 
+  std::cout << "[SER] Total serialized size: " << offset << " bytes" << std::endl;
   return offset;
 }
 
