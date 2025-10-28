@@ -317,7 +317,7 @@ GetFileResponse GetFileResponse::deserialize(const char* buffer, size_t buffer_s
 
     // Calculate actual block size by reading directly from buffer
     // Block format: block_id(8) + client_id_len(4) + client_id + sequence_num(4) +
-    //              timestamp(8) + size(4) + data
+    //              timestamp(8) + size(8 on 64-bit) + data
     size_t block_offset = 0;
     block_offset += sizeof(uint64_t);  // block_id
 
@@ -333,13 +333,13 @@ GetFileResponse GetFileResponse::deserialize(const char* buffer, size_t buffer_s
     block_offset += sizeof(uint32_t);  // sequence_num
     block_offset += sizeof(uint64_t);  // timestamp
 
-    // Read actual data size from buffer
-    uint32_t data_size = 0;
-    if (offset + block_offset + sizeof(data_size) <= buffer_size) {
-      std::memcpy(&data_size, buffer + offset + block_offset, sizeof(data_size));
+    // Read actual data size from buffer (size_t is 8 bytes on 64-bit systems)
+    size_t data_size = 0;
+    if (offset + block_offset + sizeof(size_t) <= buffer_size) {
+      std::memcpy(&data_size, buffer + offset + block_offset, sizeof(size_t));
     }
     std::cout << "[DESER] Read data_size from buffer: " << data_size << std::endl;
-    block_offset += sizeof(uint32_t);  // size field
+    block_offset += sizeof(size_t);  // size field (8 bytes on 64-bit)
     block_offset += data_size;  // actual data
 
     std::cout << "[DESER] Block " << i << " consumed " << block_offset << " bytes, next offset: " << (offset + block_offset) << std::endl;
