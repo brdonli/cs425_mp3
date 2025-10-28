@@ -17,37 +17,66 @@ FileOperationsHandler::FileOperationsHandler(FileStore& file_store,
       hash_ring_(hash_ring),
       self_id_(self_id),
       logger_(logger),
-      socket_(socket) {}
-
-std::vector<char> FileOperationsHandler::readLocalFile(const std::string& filename) {
-  std::ifstream file(filename, std::ios::binary | std::ios::ate);
-  if (!file.is_open()) {
-    logger_.log("Error: Could not open local file: " + filename);
-    return {};
-  }
-
-  std::streamsize size = file.tellg();
-  file.seekg(0, std::ios::beg);
-
-  std::vector<char> buffer(size);
-  if (!file.read(buffer.data(), size)) {
-    logger_.log("Error: Could not read local file: " + filename);
-    return {};
-  }
-
-  return buffer;
+      socket_(socket) {
+  // Load all files from test_files/ directory into local cache
+  loadTestFiles();
 }
 
-bool FileOperationsHandler::writeLocalFile(const std::string& filename,
-                                           const std::vector<char>& data) {
-  std::ofstream file(filename, std::ios::binary);
-  if (!file.is_open()) {
-    logger_.log("Error: Could not open local file for writing: " + filename);
-    return false;
+void FileOperationsHandler::loadTestFiles() {
+  std::cout << "[LOCAL_CACHE] Loading files from test_files/ directory..." << std::endl;
+
+  // Use system command to list files in test_files/
+  FILE* pipe = popen("ls test_files/ 2>/dev/null", "r");
+  if (!pipe) {
+    std::cout << "[LOCAL_CACHE] No test_files/ directory found, starting with empty cache" << std::endl;
+    return;
   }
 
-  file.write(data.data(), data.size());
-  return file.good();
+  char filename[256];
+  int files_loaded = 0;
+
+  while (fgets(filename, sizeof(filename), pipe) != nullptr) {
+    // Remove newline
+    filename[strcspn(filename, "\n")] = 0;
+
+    std::string filepath = std::string("test_files/") + filename;
+
+    // Read file into memory
+    std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+      continue;
+    }
+
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::vector<char> buffer(size);
+    if (file.read(buffer.data(), size)) {
+      std::lock_guard<std::mutex> lock(local_cache_mtx_);
+      local_file_cache_[filename] = buffer;
+      files_loaded++;
+      std::cout << "[LOCAL_CACHE]   Loaded: " << filename << " (" << size << " bytes)" << std::endl;
+    }
+  }
+
+  pclose(pipe);
+  std::cout << "[LOCAL_CACHE] Loaded " << files_loaded << " files into local cache" << std::endl;
+}
+
+bool FileOperationsHandler::getLocalFile(const std::string& filename, std::vector<char>& data) {
+  std::lock_guard<std::mutex> lock(local_cache_mtx_);
+  auto it = local_file_cache_.find(filename);
+  if (it == local_file_cache_.end()) {
+    return false;
+  }
+  data = it->second;
+  return true;
+}
+
+void FileOperationsHandler::storeLocalFile(const std::string& filename, const std::vector<char>& data) {
+  std::lock_guard<std::mutex> lock(local_cache_mtx_);
+  local_file_cache_[filename] = data;
+  std::cout << "[LOCAL_CACHE] Stored file in local cache: " << filename << " (" << data.size() << " bytes)" << std::endl;
 }
 
 std::string FileOperationsHandler::getClientId() const {
@@ -124,12 +153,17 @@ bool FileOperationsHandler::replicateBlock(const std::string& hydfs_filename,
 
 bool FileOperationsHandler::createFile(const std::string& local_filename,
                                        const std::string& hydfs_filename) {
-  // Read local file
-  std::vector<char> data = readLocalFile(local_filename);
-  if (data.empty()) {
-    std::cout << "Failed to read local file\n";
+  // Read from local cache instead of filesystem
+  std::vector<char> data;
+  if (!getLocalFile(local_filename, data)) {
+    std::cout << "❌ Failed to find local file in cache: " << local_filename << std::endl;
+    std::cout << "Hint: Use 'liststore' to see available local files" << std::endl;
     return false;
   }
+
+  std::cout << "\n=== CREATE FILE OPERATION ===" << std::endl;
+  std::cout << "Local file (from cache): " << local_filename << " (" << data.size() << " bytes)" << std::endl;
+  std::cout << "HyDFS filename: " << hydfs_filename << std::endl;
 
   // Get replicas for this file (the n=3 successors in the ring)
   std::vector<NodeId> replicas = hash_ring_.getFileReplicas(hydfs_filename, 3);
@@ -254,13 +288,13 @@ bool FileOperationsHandler::getFile(const std::string& hydfs_filename,
       std::cout << "Fetching from remote replica instead..." << std::endl;
       // Fall through to remote fetch
     } else {
-      if (writeLocalFile(local_filename, data)) {
-        std::cout << "✅ File retrieved successfully: " << hydfs_filename << " -> " << local_filename << std::endl;
-        std::cout << "File size: " << data.size() << " bytes" << std::endl;
-        logger_.log("GET operation completed for " + hydfs_filename + " (local)");
-        std::cout << "========================\n" << std::endl;
-        return true;
-      }
+      // Store in local cache
+      storeLocalFile(local_filename, data);
+      std::cout << "✅ File retrieved successfully: " << hydfs_filename << " -> " << local_filename << std::endl;
+      std::cout << "File size: " << data.size() << " bytes" << std::endl;
+      logger_.log("GET operation completed for " + hydfs_filename + " (local)");
+      std::cout << "========================\n" << std::endl;
+      return true;
     }
   }
 
@@ -354,10 +388,11 @@ bool FileOperationsHandler::getFile(const std::string& hydfs_filename,
 
 bool FileOperationsHandler::appendFile(const std::string& local_filename,
                                        const std::string& hydfs_filename) {
-  // Read local file
-  std::vector<char> data = readLocalFile(local_filename);
-  if (data.empty()) {
-    std::cout << "Failed to read local file\n";
+  // Read from local cache
+  std::vector<char> data;
+  if (!getLocalFile(local_filename, data)) {
+    std::cout << "❌ Failed to find local file in cache: " << local_filename << std::endl;
+    std::cout << "Hint: Use 'liststore' to see available local files" << std::endl;
     return false;
   }
 
@@ -510,23 +545,53 @@ void FileOperationsHandler::listFileLocations(const std::string& hydfs_filename)
 }
 
 void FileOperationsHandler::listLocalFiles() {
-  std::vector<std::string> files = file_store_.listFiles();
+  // Get HyDFS replica files
+  std::vector<std::string> hydfs_files = file_store_.listFiles();
 
-  // Print VM's ring ID first (as per MP3 spec)
+  // Get local cached files
+  std::vector<std::string> local_files;
+  {
+    std::lock_guard<std::mutex> lock(local_cache_mtx_);
+    for (const auto& pair : local_file_cache_) {
+      local_files.push_back(pair.first);
+    }
+  }
+
+  // Print VM's ring ID
   uint64_t my_ring_id = hash_ring_.getNodePosition(self_id_);
   std::cout << "\n=== LISTSTORE (VM Ring ID: " << my_ring_id << ") ===" << std::endl;
   std::cout << "Node: " << self_id_.host << ":" << self_id_.port << std::endl;
-  std::cout << "Files stored in HyDFS at this VM: " << files.size() << std::endl;
   std::cout << "========================================" << std::endl;
 
-  if (files.empty()) {
-    std::cout << "(No files stored locally)" << std::endl;
+  // Show local files (from 'get' or test_files/)
+  std::cout << "\n📁 LOCAL FILES (available for 'create'):" << std::endl;
+  if (local_files.empty()) {
+    std::cout << "   (No local files)" << std::endl;
   } else {
-    for (const auto& filename : files) {
-      FileMetadata meta = file_store_.getFileMetadata(filename);
-      std::cout << "  - " << filename << " (file ID: " << meta.file_id << ")" << std::endl;
+    for (const auto& filename : local_files) {
+      size_t size = 0;
+      {
+        std::lock_guard<std::mutex> lock(local_cache_mtx_);
+        size = local_file_cache_[filename].size();
+      }
+      std::cout << "   " << filename << " (" << size << " bytes)" << std::endl;
     }
   }
+
+  // Show HyDFS replica files
+  std::cout << "\n💾 HyDFS REPLICAS (stored on this VM):" << std::endl;
+  if (hydfs_files.empty()) {
+    std::cout << "   (No HyDFS replicas)" << std::endl;
+  } else {
+    for (const auto& filename : hydfs_files) {
+      FileMetadata meta = file_store_.getFileMetadata(filename);
+      std::cout << "   " << filename << " (file ID: " << meta.file_id << ", "
+                << meta.total_size << " bytes, v" << meta.version << ")" << std::endl;
+    }
+  }
+
+  std::cout << "\nTotals: " << local_files.size() << " local, "
+            << hydfs_files.size() << " HyDFS replicas" << std::endl;
   std::cout << "========================================\n" << std::endl;
 }
 
@@ -903,19 +968,10 @@ void FileOperationsHandler::handleGetResponse(const GetFileResponse& resp,
 
   std::cout << "Assembled file data: " << file_data.size() << " bytes" << std::endl;
 
-  // Write to local file
-  if (!writeLocalFile(local_filename, file_data)) {
-    std::cout << "❌ Failed to write to local file: " << local_filename << std::endl;
-    std::cout << "============================\n" << std::endl;
+  // Store in local cache instead of filesystem
+  storeLocalFile(local_filename, file_data);
 
-    // Signal failure
-    std::lock_guard<std::mutex> lock(pending_gets_mtx_);
-    get_results_[resp.metadata.hydfs_filename] = false;
-    get_cv_.notify_all();
-    return;
-  }
-
-  std::cout << "✅ File written successfully to: " << local_filename << std::endl;
+  std::cout << "✅ File stored in local cache: " << local_filename << std::endl;
   logger_.log("GET_RESPONSE processed successfully for " + resp.metadata.hydfs_filename);
   std::cout << "============================\n" << std::endl;
 

@@ -65,11 +65,14 @@ class FileOperationsHandler {
   UDPSocketConnection& socket_;
   ClientTracker client_tracker_;
 
-  // Helper: Read local file into buffer
-  std::vector<char> readLocalFile(const std::string& filename);
+  // Helper: Load all files from test_files directory into local cache
+  void loadTestFiles();
 
-  // Helper: Write buffer to local file
-  bool writeLocalFile(const std::string& filename, const std::vector<char>& data);
+  // Helper: Get local file from cache
+  bool getLocalFile(const std::string& filename, std::vector<char>& data);
+
+  // Helper: Store file in local cache
+  void storeLocalFile(const std::string& filename, const std::vector<char>& data);
 
   // Helper: Get client ID string from NodeId
   std::string getClientId() const;
@@ -110,4 +113,8 @@ class FileOperationsHandler {
   std::unordered_map<std::string, LsRequestState> pending_ls_;  // hydfs_filename -> state
   std::mutex pending_ls_mtx_;
   std::condition_variable ls_cv_;
+
+  // Local file cache (files retrieved via 'get' or loaded from test_files/)
+  std::unordered_map<std::string, std::vector<char>> local_file_cache_;
+  std::mutex local_cache_mtx_;
 };
