@@ -420,15 +420,30 @@ bool FileOperationsHandler::mergeFile(const std::string& hydfs_filename) {
 void FileOperationsHandler::listFileLocations(const std::string& hydfs_filename) {
   std::vector<NodeId> replicas = hash_ring_.getFileReplicas(hydfs_filename, 3);
 
+  // Check if file exists locally or anywhere
+  bool exists_locally = file_store_.hasFile(hydfs_filename);
+
+  std::cout << "\n=== LS FILE LOCATIONS ===" << std::endl;
   std::cout << "File: " << hydfs_filename << "\n";
   std::cout << "File ID: " << FileMetadata::generateFileId(hydfs_filename) << "\n";
-  std::cout << "Stored on " << replicas.size() << " replicas:\n";
+  std::cout << "File exists: " << (exists_locally ? "YES (on this VM)" : "UNKNOWN (not on this VM)") << "\n";
+  std::cout << "\nTheoretical replica locations (based on consistent hashing):\n";
+  std::cout << "These " << replicas.size() << " VMs should store this file:\n";
 
   for (const auto& replica : replicas) {
     uint64_t ring_id = hash_ring_.getNodePosition(replica);
+    bool is_self = (replica.host == self_id_.host && replica.port == self_id_.port);
+    std::string status = "";
+
+    if (is_self) {
+      status = exists_locally ? " [✓ CONFIRMED - file exists here]" : " [✗ MISSING - should be here but not found]";
+    }
+
     std::cout << "  - " << replica.host << ":" << replica.port << " (ring ID: " << ring_id
-              << ")\n";
+              << ")" << status << "\n";
   }
+  std::cout << "\nNote: Use 'getfromreplica' to verify file exists at other VMs\n";
+  std::cout << "========================\n" << std::endl;
 }
 
 void FileOperationsHandler::listLocalFiles() {
