@@ -1,37 +1,12 @@
 #include "file_store.hpp"
 
 #include <chrono>
-#include <fstream>
-#include <filesystem>
 #include <iostream>
 #include <mutex>
 
 FileStore::FileStore(const std::string& storage_dir) : storage_dir(storage_dir) {
-  // Create storage directory if it doesn't exist
-  std::filesystem::create_directories(storage_dir);
-  std::filesystem::create_directories(storage_dir + "/metadata");
-  std::filesystem::create_directories(storage_dir + "/blocks");
-
-  // Load existing files from disk (for crash recovery)
-  std::string metadata_dir = storage_dir + "/metadata";
-  if (std::filesystem::exists(metadata_dir)) {
-    for (const auto& entry : std::filesystem::directory_iterator(metadata_dir)) {
-      if (entry.is_regular_file() && entry.path().extension() == ".meta") {
-        // Extract filename from path (remove .meta extension)
-        std::string filename = entry.path().stem().string();
-        loadMetadata(filename);
-
-        // Load all blocks referenced by this metadata
-        auto it = files.find(filename);
-        if (it != files.end()) {
-          for (uint64_t block_id : it->second.block_ids) {
-            loadBlock(block_id);
-          }
-        }
-      }
-    }
-    std::cout << "Loaded " << files.size() << " file(s) from disk at startup" << std::endl;
-  }
+  // In-memory only storage - no disk persistence
+  std::cout << "[FILE_STORE] Initialized in-memory storage for " << storage_dir << std::endl;
 }
 
 bool FileStore::createFile(const std::string& filename, const std::vector<char>& data,
@@ -72,11 +47,9 @@ bool FileStore::createFile(const std::string& filename, const std::vector<char>&
 
     metadata.block_ids.push_back(block.block_id);
     blocks[block.block_id] = block;
-    persistBlock(block.block_id);
   }
 
   files[filename] = metadata;
-  persistMetadata(filename);
 
   std::cout << "[FILE_STORE] File created successfully in memory: " << filename << std::endl;
   return true;
@@ -104,9 +77,6 @@ bool FileStore::appendBlock(const std::string& filename, const FileBlock& block)
                                            now.time_since_epoch())
                                            .count();
   it->second.version++;
-
-  persistBlock(block.block_id);
-  persistMetadata(filename);
 
   std::cout << "[FILE_STORE] Block appended successfully: " << filename << std::endl;
   return true;
@@ -201,7 +171,6 @@ bool FileStore::mergeFile(const std::string& filename, std::vector<FileBlock>& a
     blocks[block.block_id] = block;
     it->second.block_ids.push_back(block.block_id);
     total_size += block.size;
-    persistBlock(block.block_id);
   }
 
   it->second.total_size = total_size;
@@ -211,8 +180,6 @@ bool FileStore::mergeFile(const std::string& filename, std::vector<FileBlock>& a
   it->second.last_modified_timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
                                            now.time_since_epoch())
                                            .count();
-
-  persistMetadata(filename);
 
   return true;
 }
@@ -225,14 +192,12 @@ bool FileStore::deleteFile(const std::string& filename) {
     return false;
   }
 
-  // Delete all blocks
+  // Delete all blocks from memory
   for (uint64_t block_id : it->second.block_ids) {
     blocks.erase(block_id);
-    std::filesystem::remove(getBlockPath(block_id));
   }
 
-  // Delete metadata
-  std::filesystem::remove(getMetadataPath(filename));
+  // Delete metadata from memory
   files.erase(it);
 
   return true;
@@ -244,126 +209,37 @@ void FileStore::clearAllFiles() {
   // Clear all in-memory structures
   files.clear();
   blocks.clear();
-
-  // Delete all files on disk
-  std::filesystem::remove_all(storage_dir + "/metadata");
-  std::filesystem::remove_all(storage_dir + "/blocks");
-  std::filesystem::create_directories(storage_dir + "/metadata");
-  std::filesystem::create_directories(storage_dir + "/blocks");
 }
 
 bool FileStore::storeFile(const FileMetadata& metadata, const std::vector<FileBlock>& file_blocks) {
   std::unique_lock<std::shared_mutex> lock(mtx);
 
-  // Store metadata
+  // Store metadata in memory
   files[metadata.hydfs_filename] = metadata;
-  persistMetadata(metadata.hydfs_filename);
 
-  // Store blocks
+  // Store blocks in memory
   for (const auto& block : file_blocks) {
     blocks[block.block_id] = block;
-    persistBlock(block.block_id);
   }
 
   return true;
 }
 
-void FileStore::persistMetadata(const std::string& filename) {
-  auto it = files.find(filename);
-  if (it == files.end()) {
-    std::cerr << "[PERSIST] Metadata not found in memory for: " << filename << std::endl;
-    return;  // File doesn't exist in memory
-  }
-
-  std::string path = getMetadataPath(filename);
-  std::ofstream file(path, std::ios::binary);
-  if (!file.is_open()) {
-    std::cerr << "[PERSIST] Failed to open metadata file for writing: " << path << std::endl;
-    return;
-  }
-
-  // Serialize metadata to buffer
-  char buffer[65536];
-  size_t size = it->second.serialize(buffer, sizeof(buffer));
-
-  if (size > 0) {
-    file.write(buffer, size);
-    file.close();
-    std::cout << "[PERSIST] Wrote metadata to: " << path << " (" << size << " bytes)" << std::endl;
-  } else {
-    std::cerr << "[PERSIST] Failed to serialize metadata for: " << filename << std::endl;
-  }
+// Note: Persistence functions removed - in-memory only storage
+void FileStore::persistMetadata(const std::string& /* filename */) {
+  // No-op: In-memory only
 }
 
-void FileStore::persistBlock(uint64_t block_id) {
-  auto it = blocks.find(block_id);
-  if (it == blocks.end()) {
-    std::cerr << "[PERSIST] Block not found in memory: " << block_id << std::endl;
-    return;  // Block doesn't exist in memory
-  }
-
-  std::string path = getBlockPath(block_id);
-  std::ofstream file(path, std::ios::binary);
-  if (!file.is_open()) {
-    std::cerr << "[PERSIST] Failed to open block file for writing: " << path << std::endl;
-    return;
-  }
-
-  // Serialize block to buffer
-  char buffer[65536];
-  size_t size = it->second.serialize(buffer, sizeof(buffer));
-
-  if (size > 0) {
-    file.write(buffer, size);
-    file.close();
-    std::cout << "[PERSIST] Wrote block to: " << path << " (" << size << " bytes)" << std::endl;
-  } else {
-    std::cerr << "[PERSIST] Failed to serialize block: " << block_id << std::endl;
-  }
+void FileStore::persistBlock(uint64_t /* block_id */) {
+  // No-op: In-memory only
 }
 
-void FileStore::loadMetadata(const std::string& filename) {
-  std::string path = getMetadataPath(filename);
-  std::ifstream file(path, std::ios::binary | std::ios::ate);
-  if (!file.is_open()) {
-    return;  // File doesn't exist on disk
-  }
-
-  // Read file contents
-  std::streamsize size = file.tellg();
-  file.seekg(0, std::ios::beg);
-
-  std::vector<char> buffer(size);
-  if (!file.read(buffer.data(), size)) {
-    std::cerr << "Failed to read metadata file: " << filename << std::endl;
-    return;
-  }
-
-  // Deserialize and store in memory
-  FileMetadata metadata = FileMetadata::deserialize(buffer.data(), buffer.size());
-  files[filename] = metadata;
+void FileStore::loadMetadata(const std::string& /* filename */) {
+  // No-op: In-memory only
 }
 
-void FileStore::loadBlock(uint64_t block_id) {
-  std::string path = getBlockPath(block_id);
-  std::ifstream file(path, std::ios::binary | std::ios::ate);
-  if (!file.is_open()) {
-    return;  // File doesn't exist on disk
-  }
-
-  // Read file contents
-  std::streamsize size = file.tellg();
-  file.seekg(0, std::ios::beg);
-
-  std::vector<char> buffer(size);
-  if (!file.read(buffer.data(), size)) {
-    std::cerr << "Failed to read block file: " << block_id << std::endl;
-    return;
-  }
-
-  // Deserialize and store in memory
-  FileBlock block = FileBlock::deserialize(buffer.data(), buffer.size());
-  blocks[block_id] = block;
+void FileStore::loadBlock(uint64_t /* block_id */) {
+  // No-op: In-memory only
 }
 
 std::string FileStore::getMetadataPath(const std::string& filename) const {

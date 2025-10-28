@@ -233,41 +233,122 @@ bool FileOperationsHandler::createFile(const std::string& local_filename,
 
 bool FileOperationsHandler::getFile(const std::string& hydfs_filename,
                                     const std::string& local_filename) {
-  // Check if we have it locally
+  std::cout << "\n=== GET FILE OPERATION ===" << std::endl;
+  std::cout << "HyDFS file: " << hydfs_filename << std::endl;
+  std::cout << "Local file: " << local_filename << std::endl;
+
+  // Check if we have it locally first
   if (file_store_.hasFile(hydfs_filename)) {
+    std::cout << "File found locally, retrieving..." << std::endl;
+    logger_.log("GET operation started for " + hydfs_filename + " (local)");
+
     std::vector<char> data = file_store_.getFile(hydfs_filename);
-    if (writeLocalFile(local_filename, data)) {
-      std::cout << "File retrieved: " << hydfs_filename << " -> " << local_filename << "\n";
-      return true;
+
+    // Check read-my-writes consistency
+    std::string client_id = getClientId();
+    std::vector<uint64_t> block_ids = file_store_.getFileMetadata(hydfs_filename).block_ids;
+
+    if (!client_tracker_.satisfiesReadMyWrites(client_id, hydfs_filename, block_ids)) {
+      std::cout << "❌ Local copy does not satisfy read-my-writes consistency" << std::endl;
+      std::cout << "Fetching from remote replica instead..." << std::endl;
+      // Fall through to remote fetch
+    } else {
+      if (writeLocalFile(local_filename, data)) {
+        std::cout << "✅ File retrieved successfully: " << hydfs_filename << " -> " << local_filename << std::endl;
+        std::cout << "File size: " << data.size() << " bytes" << std::endl;
+        logger_.log("GET operation completed for " + hydfs_filename + " (local)");
+        std::cout << "========================\n" << std::endl;
+        return true;
+      }
     }
   }
 
-  // Otherwise, find a replica
+  // Find replicas for this file
   std::vector<NodeId> replicas = hash_ring_.getFileReplicas(hydfs_filename, 3);
   if (replicas.empty()) {
-    std::cout << "No replicas found for file: " << hydfs_filename << "\n";
+    std::cout << "❌ No replicas found for file: " << hydfs_filename << std::endl;
+    std::cout << "========================\n" << std::endl;
     return false;
   }
 
-  // Send GET request to first available replica
-  GetFileRequest req;
-  req.hydfs_filename = hydfs_filename;
-  req.local_filename = local_filename;
-  req.client_id = hash_ring_.getNodePosition(self_id_);
-  req.last_known_sequence = 0;
+  std::cout << "Fetching from remote replica..." << std::endl;
+  std::cout << "Available replicas: " << replicas.size() << std::endl;
+  for (const auto& replica : replicas) {
+    std::cout << "  - " << replica.host << ":" << replica.port << std::endl;
+  }
 
-  char buffer[65536];
-  size_t size = req.serialize(buffer, sizeof(buffer));
+  // Register pending get request
+  {
+    std::lock_guard<std::mutex> lock(pending_gets_mtx_);
+    pending_gets_[hydfs_filename] = local_filename;
+    get_results_.erase(hydfs_filename);  // Clear any old result
+  }
 
-  struct sockaddr_in dest_addr;
-  std::memset(&dest_addr, 0, sizeof(dest_addr));
-  dest_addr.sin_family = AF_INET;
-  dest_addr.sin_port = htons(std::atoi(replicas[0].port));
-  inet_pton(AF_INET, replicas[0].host, &dest_addr.sin_addr);
+  // Send GET request to first available replica (try others if first fails)
+  bool request_sent = false;
+  for (const auto& replica : replicas) {
+    // Skip self if we already checked locally
+    if (replica == self_id_) {
+      continue;
+    }
 
-  sendFileMessage(FileMessageType::GET_REQUEST, buffer, size, dest_addr);
-  std::cout << "Get request sent\n";
-  return true;
+    GetFileRequest req;
+    req.hydfs_filename = hydfs_filename;
+    req.local_filename = local_filename;
+    req.client_id = hash_ring_.getNodePosition(self_id_);
+    req.last_known_sequence = 0;
+
+    char buffer[65536];
+    size_t size = req.serialize(buffer, sizeof(buffer));
+
+    struct sockaddr_in dest_addr;
+    socket_.buildServerAddr(dest_addr, replica.host, replica.port);
+
+    std::cout << "Sending GET_REQUEST to " << replica.host << ":" << replica.port << std::endl;
+    logger_.log("Sending GET_REQUEST for " + hydfs_filename + " to " +
+                std::string(replica.host) + ":" + std::string(replica.port));
+
+    if (sendFileMessage(FileMessageType::GET_REQUEST, buffer, size, dest_addr)) {
+      request_sent = true;
+      break;  // Successfully sent to one replica
+    }
+  }
+
+  if (!request_sent) {
+    std::cout << "❌ Failed to send get request to any replica" << std::endl;
+    std::lock_guard<std::mutex> lock(pending_gets_mtx_);
+    pending_gets_.erase(hydfs_filename);
+    std::cout << "========================\n" << std::endl;
+    return false;
+  }
+
+  // Wait for response with timeout
+  std::unique_lock<std::mutex> lock(pending_gets_mtx_);
+  bool received = get_cv_.wait_for(lock, std::chrono::seconds(5), [this, &hydfs_filename] {
+    return get_results_.find(hydfs_filename) != get_results_.end();
+  });
+
+  if (!received) {
+    std::cout << "❌ Timeout waiting for GET_RESPONSE" << std::endl;
+    pending_gets_.erase(hydfs_filename);
+    std::cout << "========================\n" << std::endl;
+    return false;
+  }
+
+  bool success = get_results_[hydfs_filename];
+  get_results_.erase(hydfs_filename);
+  pending_gets_.erase(hydfs_filename);
+
+  if (success) {
+    std::cout << "✅ GET operation completed successfully" << std::endl;
+    logger_.log("GET operation completed for " + hydfs_filename);
+  } else {
+    std::cout << "❌ GET operation failed" << std::endl;
+    logger_.log("GET operation failed for " + hydfs_filename);
+  }
+
+  std::cout << "========================\n" << std::endl;
+  return success;
 }
 
 bool FileOperationsHandler::appendFile(const std::string& local_filename,
@@ -431,13 +512,24 @@ void FileOperationsHandler::handleCreateRequest(const CreateFileRequest& req,
 
 void FileOperationsHandler::handleGetRequest(const GetFileRequest& req,
                                              const struct sockaddr_in& sender) {
+  char sender_ip[INET_ADDRSTRLEN];
+  inet_ntop(AF_INET, &(sender.sin_addr), sender_ip, INET_ADDRSTRLEN);
+
+  std::cout << "\n=== REPLICA RECEIVED GET_REQUEST ===" << std::endl;
+  std::cout << "File: " << req.hydfs_filename << std::endl;
+  std::cout << "From: " << sender_ip << ":" << ntohs(sender.sin_port) << std::endl;
+  logger_.log("REPLICA: Received GET_REQUEST for " + req.hydfs_filename);
+
   GetFileResponse resp;
 
   if (file_store_.hasFile(req.hydfs_filename)) {
+    std::cout << "File found in local store" << std::endl;
     resp.success = true;
     resp.metadata = file_store_.getFileMetadata(req.hydfs_filename);
     resp.blocks = file_store_.getFileBlocks(req.hydfs_filename);
+    std::cout << "Sending " << resp.blocks.size() << " blocks (" << resp.metadata.total_size << " bytes)" << std::endl;
   } else {
+    std::cout << "❌ File not found in local store" << std::endl;
     resp.success = false;
     resp.error_message = "File not found";
   }
@@ -445,6 +537,11 @@ void FileOperationsHandler::handleGetRequest(const GetFileRequest& req,
   char buffer[65536];
   size_t size = resp.serialize(buffer, sizeof(buffer));
   sendFileMessage(FileMessageType::GET_RESPONSE, buffer, size, sender);
+
+  std::cout << "✅ REPLICA: GET_REQUEST processing completed" << std::endl;
+  logger_.log("REPLICA: Completed GET_REQUEST for " + req.hydfs_filename +
+              (resp.success ? " [SUCCESS]" : " [FAILED]"));
+  std::cout << "====================================\n" << std::endl;
 }
 
 void FileOperationsHandler::handleAppendRequest(const AppendFileRequest& req,
@@ -587,6 +684,76 @@ void FileOperationsHandler::handleMergeUpdate(const MergeUpdateMessage& msg) {
   logger_.log("Received merge update for: " + msg.hydfs_filename);
 }
 
+void FileOperationsHandler::handleGetResponse(const GetFileResponse& resp,
+                                               const std::string& local_filename) {
+  std::cout << "\n=== RECEIVED GET_RESPONSE ===" << std::endl;
+  std::cout << "Success: " << (resp.success ? "YES" : "NO") << std::endl;
+
+  if (!resp.success) {
+    std::cout << "❌ Error: " << resp.error_message << std::endl;
+    std::cout << "============================\n" << std::endl;
+
+    // Signal failure to waiting thread
+    std::lock_guard<std::mutex> lock(pending_gets_mtx_);
+    auto it = pending_gets_.find(resp.metadata.hydfs_filename);
+    if (it != pending_gets_.end()) {
+      get_results_[resp.metadata.hydfs_filename] = false;
+      get_cv_.notify_all();
+    }
+    return;
+  }
+
+  std::cout << "File: " << resp.metadata.hydfs_filename << std::endl;
+  std::cout << "Blocks received: " << resp.blocks.size() << std::endl;
+  std::cout << "Total size: " << resp.metadata.total_size << " bytes" << std::endl;
+
+  // Check read-my-writes consistency
+  std::string client_id = getClientId();
+  if (!client_tracker_.satisfiesReadMyWrites(client_id, resp.metadata.hydfs_filename,
+                                             resp.metadata.block_ids)) {
+    std::cout << "❌ Response does not satisfy read-my-writes consistency" << std::endl;
+    std::cout << "Some of your appended blocks are missing from this replica" << std::endl;
+    std::cout << "============================\n" << std::endl;
+
+    // Signal failure
+    std::lock_guard<std::mutex> lock(pending_gets_mtx_);
+    get_results_[resp.metadata.hydfs_filename] = false;
+    get_cv_.notify_all();
+    return;
+  }
+
+  // Assemble file from blocks
+  std::vector<char> file_data;
+  file_data.reserve(resp.metadata.total_size);
+
+  for (const auto& block : resp.blocks) {
+    file_data.insert(file_data.end(), block.data.begin(), block.data.end());
+  }
+
+  std::cout << "Assembled file data: " << file_data.size() << " bytes" << std::endl;
+
+  // Write to local file
+  if (!writeLocalFile(local_filename, file_data)) {
+    std::cout << "❌ Failed to write to local file: " << local_filename << std::endl;
+    std::cout << "============================\n" << std::endl;
+
+    // Signal failure
+    std::lock_guard<std::mutex> lock(pending_gets_mtx_);
+    get_results_[resp.metadata.hydfs_filename] = false;
+    get_cv_.notify_all();
+    return;
+  }
+
+  std::cout << "✅ File written successfully to: " << local_filename << std::endl;
+  logger_.log("GET_RESPONSE processed successfully for " + resp.metadata.hydfs_filename);
+  std::cout << "============================\n" << std::endl;
+
+  // Signal success to waiting thread
+  std::lock_guard<std::mutex> lock(pending_gets_mtx_);
+  get_results_[resp.metadata.hydfs_filename] = true;
+  get_cv_.notify_all();
+}
+
 void FileOperationsHandler::handleFileMessage(FileMessageType type, const char* buffer,
                                               size_t buffer_size,
                                               const struct sockaddr_in& sender) {
@@ -663,7 +830,22 @@ void FileOperationsHandler::handleFileMessage(FileMessageType type, const char* 
       case FileMessageType::GET_RESPONSE: {
         GetFileResponse resp = GetFileResponse::deserialize(buffer, buffer_size);
         std::cout << "[RESPONSE] GET_RESPONSE received - success: " << resp.success << std::endl;
-        // Handle the response data if needed
+
+        // Find the pending get request to determine local filename
+        std::string local_filename;
+        {
+          std::lock_guard<std::mutex> lock(pending_gets_mtx_);
+          auto it = pending_gets_.find(resp.metadata.hydfs_filename);
+          if (it != pending_gets_.end()) {
+            local_filename = it->second;
+          }
+        }
+
+        if (!local_filename.empty()) {
+          handleGetResponse(resp, local_filename);
+        } else {
+          std::cout << "[WARNING] Received GET_RESPONSE for non-pending request" << std::endl;
+        }
         break;
       }
       case FileMessageType::APPEND_RESPONSE: {

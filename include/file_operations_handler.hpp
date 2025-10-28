@@ -29,6 +29,9 @@ class FileOperationsHandler {
   bool appendFile(const std::string& local_filename, const std::string& hydfs_filename);
   bool mergeFile(const std::string& hydfs_filename);
 
+  // Response handlers
+  void handleGetResponse(const GetFileResponse& resp, const std::string& local_filename);
+
   // Query operations
   void listFileLocations(const std::string& hydfs_filename);
   void listLocalFiles();
@@ -85,4 +88,12 @@ class FileOperationsHandler {
   // Tracking sequence numbers per file
   std::unordered_map<std::string, uint32_t> sequence_numbers_;
   std::mutex seq_mtx_;
+
+  // Tracking pending get requests (hydfs_filename -> local_filename)
+  std::unordered_map<std::string, std::string> pending_gets_;
+  std::mutex pending_gets_mtx_;
+  std::condition_variable get_cv_;
+
+  // Results of get requests (hydfs_filename -> success flag)
+  std::unordered_map<std::string, bool> get_results_;
 };
