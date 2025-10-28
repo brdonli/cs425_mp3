@@ -36,6 +36,7 @@ class FileOperationsHandler {
   // Query operations
   void listFileLocations(const std::string& hydfs_filename);
   void listLocalFiles();
+  void catLocalFile(const std::string& local_filename);
   bool getFileFromReplica(const std::string& vm_address, const std::string& hydfs_filename,
                           const std::string& local_filename);
 

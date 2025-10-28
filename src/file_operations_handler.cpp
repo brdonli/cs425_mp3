@@ -549,7 +549,7 @@ void FileOperationsHandler::listFileLocations(const std::string& hydfs_filename)
         if (resp.exists) {
           file_exists_somewhere = true;
           std::cout << "  ✓ " << vm_address << " (ring ID: " << ring_id << ")"
-                    << " - HAS FILE (size: " << resp.file_size << " bytes, version: " << resp.version << ")" << std::endl;
+                    << " - HAS FILE (size: " << resp.file_size << " bytes, last modified: " << resp.version << ")" << std::endl;
         } else {
           std::cout << "  ✗ " << vm_address << " (ring ID: " << ring_id << ")"
                     << " - NO FILE" << std::endl;
@@ -615,13 +615,40 @@ void FileOperationsHandler::listLocalFiles() {
     for (const auto& filename : hydfs_files) {
       FileMetadata meta = file_store_.getFileMetadata(filename);
       std::cout << "   " << filename << " (file ID: " << meta.file_id << ", "
-                << meta.total_size << " bytes, v" << meta.version << ")" << std::endl;
+                << meta.total_size << " bytes, last modified: " << meta.last_modified_timestamp << ")" << std::endl;
     }
   }
 
   std::cout << "\nTotals: " << local_files.size() << " local, "
             << hydfs_files.size() << " HyDFS replicas" << std::endl;
   std::cout << "========================================\n" << std::endl;
+}
+
+void FileOperationsHandler::catLocalFile(const std::string& local_filename) {
+  std::cout << "\n=== CAT LOCAL FILE ===" << std::endl;
+  std::cout << "File: " << local_filename << std::endl;
+
+  std::vector<char> data;
+  if (!getLocalFile(local_filename, data)) {
+    std::cout << "❌ File not found in local cache: " << local_filename << std::endl;
+    std::cout << "Hint: Use 'liststore' to see available local files" << std::endl;
+    std::cout << "=====================\n" << std::endl;
+    return;
+  }
+
+  std::cout << "Size: " << data.size() << " bytes" << std::endl;
+  std::cout << "---------------------" << std::endl;
+
+  // Print the contents
+  std::cout.write(data.data(), data.size());
+
+  // Ensure newline at end
+  if (!data.empty() && data.back() != '\n') {
+    std::cout << std::endl;
+  }
+
+  std::cout << "---------------------" << std::endl;
+  std::cout << "=====================\n" << std::endl;
 }
 
 bool FileOperationsHandler::getFileFromReplica(const std::string& vm_address,
@@ -876,7 +903,7 @@ void FileOperationsHandler::handleFileExistsRequest(const FileExistsRequest& req
     FileMetadata meta = file_store_.getFileMetadata(req.hydfs_filename);
     resp.file_id = meta.file_id;
     resp.file_size = meta.total_size;
-    resp.version = meta.version;
+    resp.version = meta.last_modified_timestamp;  // Using version field to store timestamp
   } else {
     resp.file_id = 0;
     resp.file_size = 0;

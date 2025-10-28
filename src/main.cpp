@@ -39,6 +39,7 @@ int main(int argc, char* argv[]) {
       std::cout << "  merge <hydfsfile>                - Merge all replicas of a file\n";
       std::cout << "  ls <hydfsfile>                   - List all VMs storing the file\n";
       std::cout << "  store / liststore                - List all files stored on this VM (with ring ID)\n";
+      std::cout << "  cat <localfile>                  - Print local file contents\n";
       std::cout << "  getfromreplica <vm:port> <hydfsfile> <localfile>\n";
       std::cout << "                                   - Get file from specific replica\n";
       std::cout << "\nMembership Operations:\n";
@@ -121,6 +122,10 @@ int main(int argc, char* argv[]) {
     } else if (input == "store" || input == "liststore") {
       // liststore: List files stored on this VM (per MP3 spec)
       node.getFileHandler()->listLocalFiles();
+    } else if (input == "cat") {
+      std::string local_file;
+      std::cin >> local_file;
+      node.getFileHandler()->catLocalFile(local_file);
     } else if (input == "getfromreplica") {
       std::string vm_address, hydfs_file, local_file;
       std::cin >> vm_address >> hydfs_file >> local_file;
