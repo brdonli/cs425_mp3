@@ -388,13 +388,20 @@ bool FileOperationsHandler::getFile(const std::string& hydfs_filename,
 
 bool FileOperationsHandler::appendFile(const std::string& local_filename,
                                        const std::string& hydfs_filename) {
+  std::cout << "\n=== APPEND FILE OPERATION ===" << std::endl;
+  std::cout << "Local file (from cache): " << local_filename << std::endl;
+  std::cout << "HyDFS file: " << hydfs_filename << std::endl;
+
   // Read from local cache
   std::vector<char> data;
   if (!getLocalFile(local_filename, data)) {
     std::cout << "❌ Failed to find local file in cache: " << local_filename << std::endl;
     std::cout << "Hint: Use 'liststore' to see available local files" << std::endl;
+    std::cout << "============================\n" << std::endl;
     return false;
   }
+
+  std::cout << "Data to append: " << data.size() << " bytes" << std::endl;
 
   // Create append request
   AppendFileRequest req;
@@ -405,24 +412,46 @@ bool FileOperationsHandler::appendFile(const std::string& local_filename,
   req.data = data;
   req.data_size = data.size();
 
+  std::cout << "Sequence number: " << req.sequence_num << std::endl;
+
   char buffer[8192];
   size_t size = req.serialize(buffer, sizeof(buffer));
 
-  // Send to coordinator
-  std::vector<NodeId> replicas = hash_ring_.getFileReplicas(hydfs_filename, 3);
-  if (replicas.empty()) {
-    std::cout << "No replicas found\n";
+  if (size > sizeof(buffer)) {
+    std::cout << "❌ Error: Data too large to send in single message" << std::endl;
+    std::cout << "Maximum size: " << sizeof(buffer) << " bytes" << std::endl;
+    std::cout << "============================\n" << std::endl;
     return false;
   }
 
-  struct sockaddr_in dest_addr;
-  std::memset(&dest_addr, 0, sizeof(dest_addr));
-  dest_addr.sin_family = AF_INET;
-  dest_addr.sin_port = htons(std::atoi(replicas[0].port));
-  inet_pton(AF_INET, replicas[0].host, &dest_addr.sin_addr);
+  // Send to coordinator (first replica)
+  std::vector<NodeId> replicas = hash_ring_.getFileReplicas(hydfs_filename, 3);
+  if (replicas.empty()) {
+    std::cout << "❌ No replicas found for file" << std::endl;
+    std::cout << "============================\n" << std::endl;
+    return false;
+  }
 
-  sendFileMessage(FileMessageType::APPEND_REQUEST, buffer, size, dest_addr);
-  std::cout << "Append request sent\n";
+  NodeId coordinator = replicas[0];
+  std::cout << "Coordinator: " << coordinator.host << ":" << coordinator.port << std::endl;
+
+  struct sockaddr_in dest_addr;
+  socket_.buildServerAddr(dest_addr, coordinator.host, coordinator.port);
+
+  logger_.log("Sending APPEND_REQUEST for " + hydfs_filename + " to coordinator " +
+              std::string(coordinator.host) + ":" + std::string(coordinator.port));
+
+  if (!sendFileMessage(FileMessageType::APPEND_REQUEST, buffer, size, dest_addr)) {
+    std::cout << "❌ Failed to send append request" << std::endl;
+    std::cout << "============================\n" << std::endl;
+    return false;
+  }
+
+  std::cout << "✅ Append request sent to coordinator" << std::endl;
+  std::cout << "Data will be appended and replicated to all " << replicas.size() << " replicas" << std::endl;
+  logger_.log("APPEND operation initiated for " + hydfs_filename);
+  std::cout << "============================\n" << std::endl;
+
   return true;
 }
 
@@ -735,6 +764,12 @@ void FileOperationsHandler::handleGetRequest(const GetFileRequest& req,
 
 void FileOperationsHandler::handleAppendRequest(const AppendFileRequest& req,
                                                 const struct sockaddr_in& sender) {
+  std::cout << "\n=== COORDINATOR RECEIVED APPEND_REQUEST ===" << std::endl;
+  std::cout << "File: " << req.hydfs_filename << std::endl;
+  std::cout << "Client ID: " << req.client_id << std::endl;
+  std::cout << "Sequence: " << req.sequence_num << std::endl;
+  std::cout << "Data size: " << req.data_size << " bytes" << std::endl;
+
   // Create block
   FileBlock block;
   block.client_id = std::to_string(req.client_id);
@@ -746,8 +781,17 @@ void FileOperationsHandler::handleAppendRequest(const AppendFileRequest& req,
   block.size = req.data.size();
   block.block_id = FileBlock::generateBlockId(block.client_id, block.timestamp, req.sequence_num);
 
+  std::cout << "Generated block ID: " << block.block_id << std::endl;
+
   // Append locally
   bool success = file_store_.appendBlock(req.hydfs_filename, block);
+
+  if (success) {
+    std::cout << "✅ Appended to local store" << std::endl;
+    logger_.log("Appended block " + std::to_string(block.block_id) + " to " + req.hydfs_filename);
+  } else {
+    std::cout << "❌ Failed to append locally" << std::endl;
+  }
 
   AppendFileResponse resp;
   resp.success = success;
@@ -764,9 +808,15 @@ void FileOperationsHandler::handleAppendRequest(const AppendFileRequest& req,
   // Replicate to other nodes
   if (success) {
     std::vector<NodeId> replicas = hash_ring_.getFileReplicas(req.hydfs_filename, 3);
+    std::cout << "Replicating to " << replicas.size() << " replicas..." << std::endl;
+
     replicateBlock(req.hydfs_filename, block, replicas);
     client_tracker_.recordAppend(block.client_id, req.hydfs_filename, block.block_id);
+
+    std::cout << "✅ COORDINATOR: Append operation completed" << std::endl;
   }
+
+  std::cout << "=========================================\n" << std::endl;
 }
 
 void FileOperationsHandler::handleMergeRequest(const MergeFileRequest& req,
