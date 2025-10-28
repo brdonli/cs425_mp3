@@ -738,7 +738,18 @@ void FileOperationsHandler::handleGetRequest(const GetFileRequest& req,
     resp.success = true;
     resp.metadata = file_store_.getFileMetadata(req.hydfs_filename);
     resp.blocks = file_store_.getFileBlocks(req.hydfs_filename);
-    std::cout << "Sending " << resp.blocks.size() << " blocks (" << resp.metadata.total_size << " bytes)" << std::endl;
+    std::cout << "Metadata shows " << resp.metadata.block_ids.size() << " block IDs" << std::endl;
+    std::cout << "Retrieved " << resp.blocks.size() << " blocks" << std::endl;
+
+    // Debug: Show each block
+    size_t total_block_size = 0;
+    for (size_t i = 0; i < resp.blocks.size(); i++) {
+      std::cout << "  Block " << i << ": " << resp.blocks[i].size << " bytes (seq: "
+                << resp.blocks[i].sequence_num << ", block_id: " << resp.blocks[i].block_id << ")" << std::endl;
+      total_block_size += resp.blocks[i].size;
+    }
+    std::cout << "Total block data size: " << total_block_size << " bytes" << std::endl;
+    std::cout << "Metadata total_size: " << resp.metadata.total_size << " bytes" << std::endl;
 
     // Check if file is too large for single UDP packet
     if (resp.metadata.total_size > 7000) {  // Conservative limit for 8KB buffer
@@ -1017,8 +1028,15 @@ void FileOperationsHandler::handleGetResponse(const GetFileResponse& resp,
   }
 
   std::cout << "File: " << resp.metadata.hydfs_filename << std::endl;
+  std::cout << "Metadata has " << resp.metadata.block_ids.size() << " block IDs" << std::endl;
   std::cout << "Blocks received: " << resp.blocks.size() << std::endl;
-  std::cout << "Total size: " << resp.metadata.total_size << " bytes" << std::endl;
+  std::cout << "Metadata total_size: " << resp.metadata.total_size << " bytes" << std::endl;
+
+  // Debug: Show each received block
+  for (size_t i = 0; i < resp.blocks.size(); i++) {
+    std::cout << "  Received Block " << i << ": " << resp.blocks[i].size << " bytes (seq: "
+              << resp.blocks[i].sequence_num << ", block_id: " << resp.blocks[i].block_id << ")" << std::endl;
+  }
 
   // Check read-my-writes consistency
   std::string client_id = getClientId();
