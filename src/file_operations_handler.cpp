@@ -1036,6 +1036,17 @@ void FileOperationsHandler::handleGetResponse(const GetFileResponse& resp,
   for (size_t i = 0; i < resp.blocks.size(); i++) {
     std::cout << "  Received Block " << i << ": " << resp.blocks[i].size << " bytes (seq: "
               << resp.blocks[i].sequence_num << ", block_id: " << resp.blocks[i].block_id << ")" << std::endl;
+    std::cout << "    Block data.size(): " << resp.blocks[i].data.size() << " bytes" << std::endl;
+    if (!resp.blocks[i].data.empty()) {
+      std::cout << "    First 20 chars: ";
+      size_t preview_len = std::min(size_t(20), resp.blocks[i].data.size());
+      for (size_t j = 0; j < preview_len; j++) {
+        char c = resp.blocks[i].data[j];
+        if (std::isprint(c)) std::cout << c;
+        else std::cout << '.';
+      }
+      std::cout << std::endl;
+    }
   }
 
   // Check read-my-writes consistency
